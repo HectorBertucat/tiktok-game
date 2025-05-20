@@ -38,37 +38,62 @@ class Orb:
         self.body, self.shape = body, shape
 
 
-class Saw:
-    def __init__(self, img_surface: pygame.Surface, owner_orb, space,
-                 orbit_radius=100, omega_deg=720):
-        self.owner = owner_orb
-        self.angle = random.uniform(0, 360)
-        self.omega = omega_deg                 # °/s
-        self.r_orbit = orbit_radius
+class Pickup:
+    """
+    Objet au sol qu’un orb peut ramasser.
+    kind: 'saw', 'heart', etc.
+    """
+    def __init__(self, kind, img_surface, pos, space):
+        self.kind = kind
+        self.sprite = pygame.transform.smoothscale(img_surface, (40, 40))
+        body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+        body.position = pos
+        shape = pymunk.Circle(body, 20)
+        shape.collision_type = 3
+        shape.pickup_ref = self
+        space.add(body, shape)
+        self.body, self.shape = body, shape
         self.alive = True
 
-        # sprite préparé 64×64
-        self.sprite_orig = pygame.transform.smoothscale(img_surface, (64, 64))
+    def draw(self, screen, offset=(0, 0)):
+        if not self.alive:
+            return
+        x, y = self.body.position
+        rect = self.sprite.get_rect(center=(x + offset[0], y + offset[1]))
+        screen.blit(self.sprite, rect)
+
+    def destroy(self, space):
+        self.alive = False
+        space.remove(self.body, self.shape)
+
+class Saw:
+    """
+    Scie attachée (centrée) sur son owner. Rayon > orb → dépasse visuellement.
+    """
+    def __init__(self, img_surface, owner_orb, space,
+                 scale_px=150, omega_deg=720):
+        self.owner = owner_orb
+        self.angle = 0
+        self.omega = omega_deg
+        self.alive = True
+
+        self.sprite_orig = pygame.transform.smoothscale(img_surface,
+                                                        (scale_px, scale_px))
         self.sprite = self.sprite_orig
 
-        # corps « kinematic » car on pilote nous-mêmes la position
+        r = scale_px // 2
         body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
-        body.position = owner_orb.body.position  # sera déplacé au 1ᵉʳ update
-        shape = pymunk.Circle(body, 32)
-        shape.collision_type = 2      # 1 = orb, 2 = saw
+        body.position = owner_orb.body.position
+        shape = pymunk.Circle(body, r)
+        shape.collision_type = 2
         shape.saw_ref = self
-
         space.add(body, shape)
         self.body, self.shape = body, shape
 
-    # --- logique -------
     def update(self, dt):
+        # tourne en place, suit l’orb
         self.angle += self.omega * dt
-        a = math.radians(self.angle)
-        ox, oy = self.owner.body.position
-        self.body.position = (ox + self.r_orbit * math.cos(a),
-                              oy + self.r_orbit * math.sin(a))
-        # rotation visuelle inverse (pour paraître tourner)
+        self.body.position = self.owner.body.position
         self.sprite = pygame.transform.rotate(self.sprite_orig, -self.angle)
 
     def draw(self, screen, offset=(0, 0)):
@@ -81,3 +106,4 @@ class Saw:
     def destroy(self, space):
         self.alive = False
         space.remove(self.body, self.shape)
+        # on pourrait déclencher un petit effet ici

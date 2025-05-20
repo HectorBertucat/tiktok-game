@@ -1,5 +1,8 @@
 # engine/physics.py
 import pymunk, random
+from engine.game_objects import Saw
+
+active_saws = []
 
 def make_space(arena_size=(800, 800)):
     space = pymunk.Space()
@@ -47,3 +50,28 @@ def register_saw_hits(space, dmg=2):
         saw.destroy(space)   # one-shot
 
     handler.post_solve = post_solve
+
+def register_pickup_handler(space):
+    """
+    orb (1) touche pickup (3) → applique l’effet, supprime le token.
+    """
+    handler = space.add_collision_handler(1, 3)
+
+    def begin(arbiter, _space, _data):
+        orb_shape, pick_shape = arbiter.shapes
+        orb   = orb_shape.orb_ref
+        pickup = pick_shape.pickup_ref
+        if not pickup.alive:
+            return False
+
+        if pickup.kind == 'saw':
+            # équipe l’orb d’une scie (si pas déjà)
+            if not getattr(orb, "saw_equipped", None):
+                orb.saw_equipped = Saw(blade_img, orb, space)
+                globals()["active_saws"].append(orb.saw_equipped)
+        # d’autres kinds plus tard…
+
+        pickup.destroy(space)
+        return False  # on ne veut pas la physique standard
+
+    handler.begin = begin
