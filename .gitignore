@@ -9,3 +9,4 @@ export/
 arena-env/
 engine/__pycache__/
 logos/
+__pycache__/
