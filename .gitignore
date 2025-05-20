@@ -1,0 +1,11 @@
+.DS_Store
+.venv
+.idea
+.vscode
+.pytest_cache
+.pytest_cache
+area-env/
+export/
+arena-env/
+engine/__pycache__/
+logos/

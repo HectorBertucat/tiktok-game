@@ -1,0 +1,6 @@
+title: "Inter vs PSG"
+seed: 42
+arena: { size: [800, 800] }
+orbs:
+  - { name: "Inter", logo: "assets/logos/inter.svg.png", max_hp: 6 }
+  - { name: "PSG",   logo: "assets/logos/psg.svg.webp",   max_hp: 6 }
