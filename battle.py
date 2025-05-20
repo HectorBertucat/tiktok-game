@@ -6,7 +6,7 @@ from pathlib import Path
 from ruamel.yaml import YAML
 import numpy as np
 from engine.game_objects import Orb
-from engine.physics import make_space
+from engine.physics import make_space, register_orb_collisions
 from engine.renderer import draw_hp_bar, surface_to_array
 
 CFG = Path("configs/demo.yml")
@@ -32,32 +32,42 @@ def main():
     for orb_cfg in cfg["orbs"]:
         img = pygame.image.load(orb_cfg["logo"]).convert_alpha()
         img = pygame.transform.smoothscale(img, (120, 120))
-        radius = img.get_width() // 2
+        orb = Orb(orb_cfg["name"], img, None, None, orb_cfg["max_hp"])
+        orb.attach_shape(space, radius=60)        # ← nouveau
+        orbs.append(orb)
 
-        body = pymunk.Body(mass=1, moment=10_000)
-        body.position = random.randint(150, W-150), random.randint(150, H-150)
-        body.velocity = random.choice([(250,150), (-200,230), (200,-220)])
+    register_orb_collisions(space)
 
-        shape = pymunk.Circle(body, radius)
-        shape.elasticity = 1.0
-        space.add(body, shape)
-
-        orbs.append(Orb(orb_cfg["name"], img, body, shape, orb_cfg["max_hp"]))
-
-    frames = []
+    frames, winner = [], None
     for frame_idx in range(int(DURATION * FPS)):
+        # quit event
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit(); return
 
-        # handle collisions (simple = chaque rebond = -1 HP)
-        for arbiter in space.step(1/FPS) or []:
-            pass  # pymunk 6.x renvoie None, on gérera plus tard
+        space.step(1 / FPS)
+
+        # Check defeat
+        living = [o for o in orbs if o.hp > 0]
+        if winner is None and len(living) == 1:
+            winner = living[0]
+            win_frame = frame_idx
 
         screen.fill((20, 20, 20))
         for orb in orbs:
-            orb.draw(screen)
+            if orb.hp > 0:
+                orb.draw(screen)
             draw_hp_bar(screen, orb)
+
+        # Affichage logo gagnant pendant 2 s
+        if winner:
+            if frame_idx - win_frame < 2 * FPS:
+                giant = pygame.transform.smoothscale(
+                    winner.logo_surface, (300, 300))
+                rect = giant.get_rect(center=(W//2, H//2))
+                screen.blit(giant, rect)
+            else:
+                break  # on stoppe la capture une fois la célébration finie
 
         pygame.display.flip()
         frames.append(surface_to_array(screen).copy())
@@ -66,8 +76,8 @@ def main():
     pygame.quit()
     OUT.mkdir(exist_ok=True)
     video_path = OUT / f"{cfg['title'].replace(' ','_')}.mp4"
-    clip = ImageSequenceClip(frames, fps=FPS)
-    clip.write_videofile(video_path.as_posix(), codec="libx264")
+    ImageSequenceClip(frames, fps=FPS).write_videofile(
+        video_path.as_posix(), codec="libx264")
     print("Saved ->", video_path)
 
 if __name__ == "__main__":
