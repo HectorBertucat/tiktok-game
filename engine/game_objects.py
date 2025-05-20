@@ -10,6 +10,7 @@ class Orb:
     shape: pymunk.Circle
     max_hp: int = 6
     hp: int = field(init=False)
+    outline_color: tuple[int,int,int] = field(default=(255,255,255)) # Default to white
     heal_effect_active: bool = field(init=False, default=False)
     heal_effect_timer: int = field(init=False, default=0)
 
@@ -19,6 +20,12 @@ class Orb:
     def draw(self, screen, offset=(0, 0)):
         x = self.body.position.x + offset[0]
         y = self.body.position.y + offset[1]
+
+        # Draw outline first
+        outline_radius = self.shape.radius + 3 # Slightly larger for outline
+        pygame.draw.circle(screen, self.outline_color, (int(x), int(y)), int(outline_radius), width=3)
+
+        # Draw logo on top
         rect = self.logo_surface.get_rect(center=(x, y))
         screen.blit(self.logo_surface, rect)
 

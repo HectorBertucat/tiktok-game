@@ -9,19 +9,23 @@ from director import Director
 from engine.game_objects import Orb, Saw, Pickup
 import engine.physics as phys
 from engine.physics import make_space, register_orb_collisions, register_saw_hits, register_pickup_handler, active_saws
-from engine.renderer import draw_top_hp_bar, surface_to_array
+from engine.renderer import draw_top_hp_bar, surface_to_array, Camera
+from engine.effects import ParticleEmitter
 
 # --- Layout 1080 × 1920 ---
 CANVAS_W, CANVAS_H = 1080, 1920
 SAFE_TOP    = 220
-ARENA_SIZE  = 1080
-ARENA_X0    = (CANVAS_W - ARENA_SIZE)
+ARENA_SIZE  = 1080 # This will be the width and height of the square arena
+ARENA_W = ARENA_SIZE
+ARENA_H = ARENA_SIZE
+# ARENA_X0    = (CANVAS_W - ARENA_SIZE) # Old calculation
+ARENA_X0    = (CANVAS_W - ARENA_W) // 2 # Centered horizontally
 ARENA_Y0    = SAFE_TOP + 80
 SAW_SPAWN_T = 5
 SAW_TOKEN_T = 4
 CFG = Path("configs/demo.yml")
 OUT = Path("export")
-FPS = 60
+FPS = 120
 DURATION = 70        # on vise 10 s pour tester
 SCRIPT_FILE = Path("configs/battle_script.yml")
 
@@ -54,6 +58,8 @@ def main():
 
     default_font = pygame.font.SysFont(None, 48)
     active_text_overlays = []
+    camera = Camera()
+    particle_emitter = ParticleEmitter()
 
     screen = pygame.display.set_mode((CANVAS_W, CANVAS_H))
     clock  = pygame.time.Clock()
@@ -62,7 +68,7 @@ def main():
     heart_token_img = pygame.image.load("assets/pickups/heart_token.png").convert_alpha()
     phys.blade_img = blade_img
 
-    space = make_space((ARENA_SIZE, ARENA_SIZE))
+    space = make_space((ARENA_W, ARENA_H))
     director = Director(SCRIPT_FILE)
 
     # Game state dictionary
@@ -85,14 +91,16 @@ def main():
         saw_token_img, heart_token_img, blade_img, 
         active_text_overlays, default_font, game_state, orbs,
         slow_mo_start_sfx, slow_mo_end_sfx,
-        health_boost_sfx, hit_normal_sfx, hit_blade_sfx
+        health_boost_sfx, hit_normal_sfx, hit_blade_sfx,
+        camera, particle_emitter
     )
 
     for orb_cfg in cfg["orbs"]:
         img = pygame.image.load(orb_cfg["logo"]).convert_alpha()
         img = pygame.transform.smoothscale(img, (120, 120))
+        orb_color = tuple(orb_cfg.get("outline_color", [255,255,255])) # Load color, default white
 
-        orb = Orb(orb_cfg["name"], img, None, None, orb_cfg["max_hp"])
+        orb = Orb(orb_cfg["name"], img, None, None, orb_cfg["max_hp"], outline_color=orb_color)
         orb.attach_shape(space, radius=60)
         orbs.append(orb) # Orbs list is populated here, context already has a reference to the empty list
 
@@ -129,17 +137,19 @@ def main():
         current_fps_factor = game_state["game_speed_factor"]
         dt_simulation = (1 / FPS) * current_fps_factor
         space.step(dt_simulation)
+        camera.update(dt_simulation)
+        particle_emitter.update(dt_simulation)
 
         if t_sec >= SAW_TOKEN_T and not any(p.kind=='saw' for p in pickups):
-            px = random.randint(60, ARENA_SIZE-60)
-            py = random.randint(60, ARENA_SIZE-60)
+            px = random.randint(60, ARENA_W - 60)
+            py = random.randint(60, ARENA_H - 60)
             pickup = Pickup('saw', saw_token_img, (px, py), space)
             pickups.append(pickup)
 
         HEART_TOKEN_T = SAW_TOKEN_T * 2
         if t_sec >= HEART_TOKEN_T and not any(p.kind == 'heart' for p in pickups) and random.random() < 0.25:
-            px = random.randint(60, ARENA_SIZE - 60)
-            py = random.randint(60, ARENA_SIZE - 60)
+            px = random.randint(60, ARENA_W - 60)
+            py = random.randint(60, ARENA_H - 60)
             pickup = Pickup('heart', heart_token_img, (px, py), space)
             pickups.append(pickup)
 
@@ -182,9 +192,17 @@ def main():
                 if orb.heal_effect_timer <= 0:
                     orb.heal_effect_active = False
 
+        arena_render_offset_x = ARENA_X0 + camera.offset.x
+        arena_render_offset_y = ARENA_Y0 + camera.offset.y
+
         pygame.draw.rect(
             screen, (255, 0, 90),
-            (ARENA_X0, ARENA_Y0, ARENA_SIZE, ARENA_SIZE), width=6)
+            (arena_render_offset_x, arena_render_offset_y, ARENA_W, ARENA_H), width=6)
+
+        # Draw particles: their positions are in arena space.
+        # We pass the total offset of the arena on the screen (ARENA_X0/Y0 + camera_shake)
+        effective_arena_offset_for_particles = pygame.math.Vector2(arena_render_offset_x, arena_render_offset_y)
+        particle_emitter.draw(screen, effective_arena_offset_for_particles)
 
         current_time_for_overlay = frame_idx / FPS
         for overlay in active_text_overlays[:]:
@@ -194,12 +212,12 @@ def main():
                 active_text_overlays.remove(overlay)
 
         for p in pickups:
-            p.draw(screen, offset=(ARENA_X0, ARENA_Y0))
+            p.draw(screen, offset=(arena_render_offset_x, arena_render_offset_y))
         for s in active_saws:
-            s.draw(screen, offset=(ARENA_X0, ARENA_Y0))
-        for orb in orbs:
-            if orb.hp > 0:
-                orb.draw(screen, offset=(ARENA_X0, ARENA_Y0))
+            s.draw(screen, offset=(arena_render_offset_x, arena_render_offset_y))
+        for orb_to_draw in orbs:
+            if orb_to_draw.hp > 0:
+                orb_to_draw.draw(screen, offset=(arena_render_offset_x, arena_render_offset_y))
 
         if winner:
             if frame_idx - win_frame < 2 * FPS:
@@ -227,7 +245,8 @@ class MainBattleContext:
                  active_text_overlays_list, default_font_instance,
                  game_state_dict, orbs_list,
                  slow_mo_start_sfx=None, slow_mo_end_sfx=None,
-                 health_boost_sfx=None, hit_normal_sfx=None, hit_blade_sfx=None):
+                 health_boost_sfx=None, hit_normal_sfx=None, hit_blade_sfx=None,
+                 camera_instance=None, particle_emitter_instance=None):
         self.screen = screen
         self.space = space
         self.pickups = pickups_list
@@ -243,6 +262,8 @@ class MainBattleContext:
         self.health_boost_sfx = health_boost_sfx
         self.hit_normal_sfx = hit_normal_sfx
         self.hit_blade_sfx = hit_blade_sfx
+        self.camera = camera_instance
+        self.particle_emitter = particle_emitter_instance
         # You might want to initialize an audio manager or pydub interface here
         # self.audio_manager = MyAudioManager() 
 
@@ -261,11 +282,11 @@ class MainBattleContext:
         if px is None: px = random.uniform(0.1, 0.9)
         if py is None: py = random.uniform(0.1, 0.9)
 
-        final_x = int(px * ARENA_SIZE) if not x_is_abs and isinstance(px, float) and 0 <= px <= 1 else int(px) 
-        final_y = int(py * ARENA_SIZE) if not y_is_abs and isinstance(py, float) and 0 <= py <= 1 else int(py)
+        final_x = int(px * ARENA_W) if not x_is_abs and isinstance(px, float) and 0 <= px <= 1 else int(px)
+        final_y = int(py * ARENA_H) if not y_is_abs and isinstance(py, float) and 0 <= py <= 1 else int(py)
         
-        final_x = max(60, min(ARENA_SIZE - 60, final_x))
-        final_y = max(60, min(ARENA_SIZE - 60, final_y))
+        final_x = max(60, min(ARENA_W - 60, final_x))
+        final_y = max(60, min(ARENA_H - 60, final_y))
 
         img = None
         if kind == "saw":
