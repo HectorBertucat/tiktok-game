@@ -28,7 +28,15 @@ def register_orb_collisions(space, battle_context, dmg=1):
             return
         o1, o2 = arbiter.shapes[0].orb_ref, arbiter.shapes[1].orb_ref
         o1.take_hit(dmg)
+        battle_context.camera.shake(intensity=5, duration=0.2)
+        # Convert Pymunk Vec2d to tuple for particle emitter position
+        pos_o1 = (o1.body.position.x, o1.body.position.y)
+        battle_context.particle_emitter.emit(position=pos_o1, count=30, initial_lifetime=0.4, initial_radius=5, spread_velocity=50)
         o2.take_hit(dmg)
+        battle_context.camera.shake(intensity=5, duration=0.2) # Or maybe a slightly different shake or combine them? For now, separate shakes.
+        # Convert Pymunk Vec2d to tuple for particle emitter position
+        pos_o2 = (o2.body.position.x, o2.body.position.y)
+        battle_context.particle_emitter.emit(position=pos_o2, count=30, initial_lifetime=0.4, initial_radius=5, spread_velocity=50)
         battle_context.play_sfx(battle_context.hit_normal_sfx)
 
     handler.post_solve = post_solve
@@ -48,6 +56,10 @@ def register_saw_hits(space, battle_context, dmg=2):
         if orb == saw.owner or not saw.alive:
             return           # on touche son propre porteur => rien
         orb.take_hit(dmg)
+        battle_context.camera.shake(intensity=5, duration=0.2)
+        # Convert Pymunk Vec2d to tuple for particle emitter position
+        pos_orb = (orb.body.position.x, orb.body.position.y)
+        battle_context.particle_emitter.emit(position=pos_orb, count=30, initial_lifetime=0.4, initial_radius=5, spread_velocity=50)
         battle_context.play_sfx(battle_context.hit_blade_sfx)
         saw.destroy(space)   # one-shot
 

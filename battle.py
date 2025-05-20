@@ -10,6 +10,8 @@ from engine.game_objects import Orb, Saw, Pickup
 import engine.physics as phys
 from engine.physics import make_space, register_orb_collisions, register_saw_hits, register_pickup_handler, active_saws
 from engine.renderer import draw_top_hp_bar, surface_to_array
+from engine.camera import Camera
+from engine.particles import ParticleEmitter
 
 # --- Layout 1080 × 1920 ---
 CANVAS_W, CANVAS_H = 1080, 1920
@@ -78,6 +80,9 @@ def main():
     pickups = [] # Initialize pickups list here
     saws = [] # Initialize saws list here (though it's not directly in context, good practice)
 
+    camera = Camera()
+    particle_emitter = ParticleEmitter()
+
     # Create the context that director and physics callbacks will use
     # This instance holds references to game objects and state that events might modify.
     battle_context = MainBattleContext(
@@ -85,7 +90,9 @@ def main():
         saw_token_img, heart_token_img, blade_img, 
         active_text_overlays, default_font, game_state, orbs,
         slow_mo_start_sfx, slow_mo_end_sfx,
-        health_boost_sfx, hit_normal_sfx, hit_blade_sfx
+        health_boost_sfx, hit_normal_sfx, hit_blade_sfx,
+        camera,
+        particle_emitter
     )
 
     for orb_cfg in cfg["orbs"]:
@@ -128,6 +135,10 @@ def main():
         
         current_fps_factor = game_state["game_speed_factor"]
         dt_simulation = (1 / FPS) * current_fps_factor
+        
+        camera.update(dt_simulation)
+        particle_emitter.update(dt_simulation)
+        
         space.step(dt_simulation)
 
         if t_sec >= SAW_TOKEN_T and not any(p.kind=='saw' for p in pickups):
@@ -193,13 +204,20 @@ def main():
             else:
                 active_text_overlays.remove(overlay)
 
+        current_camera_offset = camera.get_render_offset()
+        render_offset_x = ARENA_X0 + current_camera_offset[0]
+        render_offset_y = ARENA_Y0 + current_camera_offset[1]
+        combined_offset = (render_offset_x, render_offset_y)
+
         for p in pickups:
-            p.draw(screen, offset=(ARENA_X0, ARENA_Y0))
+            p.draw(screen, offset=combined_offset)
         for s in active_saws:
-            s.draw(screen, offset=(ARENA_X0, ARENA_Y0))
+            s.draw(screen, offset=combined_offset)
         for orb in orbs:
             if orb.hp > 0:
-                orb.draw(screen, offset=(ARENA_X0, ARENA_Y0))
+                orb.draw(screen, offset=combined_offset)
+        
+        particle_emitter.draw(screen, world_to_screen_offset=combined_offset)
 
         if winner:
             if frame_idx - win_frame < 2 * FPS:
@@ -227,7 +245,8 @@ class MainBattleContext:
                  active_text_overlays_list, default_font_instance,
                  game_state_dict, orbs_list,
                  slow_mo_start_sfx=None, slow_mo_end_sfx=None,
-                 health_boost_sfx=None, hit_normal_sfx=None, hit_blade_sfx=None):
+                 health_boost_sfx=None, hit_normal_sfx=None, hit_blade_sfx=None,
+                 camera=None, particle_emitter=None): # Added camera and particle_emitter
         self.screen = screen
         self.space = space
         self.pickups = pickups_list
@@ -243,6 +262,8 @@ class MainBattleContext:
         self.health_boost_sfx = health_boost_sfx
         self.hit_normal_sfx = hit_normal_sfx
         self.hit_blade_sfx = hit_blade_sfx
+        self.camera = camera # Added this
+        self.particle_emitter = particle_emitter # Added this
         # You might want to initialize an audio manager or pydub interface here
         # self.audio_manager = MyAudioManager() 
 
