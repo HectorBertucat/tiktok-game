@@ -19,7 +19,7 @@ def make_space(arena_size=(800, 800)):
 
     return space
 
-def register_orb_collisions(space, dmg=1):
+def register_orb_collisions(space, battle_context, dmg=1):
     handler = space.add_collision_handler(1, 1)  # orb vs orb
 
     def post_solve(arbiter, _space, _data):
@@ -29,11 +29,12 @@ def register_orb_collisions(space, dmg=1):
         o1, o2 = arbiter.shapes[0].orb_ref, arbiter.shapes[1].orb_ref
         o1.take_hit(dmg)
         o2.take_hit(dmg)
+        battle_context.play_sfx(battle_context.hit_normal_sfx)
 
     handler.post_solve = post_solve
 
 
-def register_saw_hits(space, dmg=2):
+def register_saw_hits(space, battle_context, dmg=2):
     """
     orb (1) touche scie (2) —> celui qui n'est PAS le propriétaire perd dmg HP
     """
@@ -47,11 +48,12 @@ def register_saw_hits(space, dmg=2):
         if orb == saw.owner or not saw.alive:
             return           # on touche son propre porteur => rien
         orb.take_hit(dmg)
+        battle_context.play_sfx(battle_context.hit_blade_sfx)
         saw.destroy(space)   # one-shot
 
     handler.post_solve = post_solve
 
-def register_pickup_handler(space):
+def register_pickup_handler(space, battle_context):
     """
     orb (1) touche pickup (3) → applique l'effet, supprime le token.
     """
@@ -67,10 +69,11 @@ def register_pickup_handler(space):
         if pickup.kind == 'saw':
             # équipe l'orb d'une scie (si pas déjà)
             if not getattr(orb, "saw_equipped", None):
-                orb.saw_equipped = Saw(blade_img, orb, space)
+                orb.saw_equipped = Saw(battle_context.blade_img, orb, space)
                 globals()["active_saws"].append(orb.saw_equipped)
         elif pickup.kind == 'heart':
             orb.heal(2)
+            battle_context.play_sfx(battle_context.health_boost_sfx)
         # d'autres kinds plus tard…
 
         pickup.destroy(space)

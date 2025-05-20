@@ -35,6 +35,23 @@ def main():
 
     pygame.init()
     pygame.font.init()
+    pygame.mixer.init() # Initialize the mixer
+
+    # Load SFX
+    try:
+        slow_mo_start_sfx = pygame.mixer.Sound("assets/sfx/slow_mo_start.wav")
+        slow_mo_end_sfx = pygame.mixer.Sound("assets/sfx/slow_mo_end.wav")
+        health_boost_sfx = pygame.mixer.Sound("assets/sfx/health_boost.wav")
+        hit_normal_sfx = pygame.mixer.Sound("assets/sfx/hit_normal.wav")
+        hit_blade_sfx = pygame.mixer.Sound("assets/sfx/hit_blade.wav")
+    except pygame.error as e:
+        print(f"Warning: Could not load SFX - {e}")
+        slow_mo_start_sfx = None
+        slow_mo_end_sfx = None
+        health_boost_sfx = None
+        hit_normal_sfx = None
+        hit_blade_sfx = None
+
     default_font = pygame.font.SysFont(None, 48)
     active_text_overlays = []
 
@@ -48,34 +65,42 @@ def main():
     space = make_space((ARENA_SIZE, ARENA_SIZE))
     director = Director(SCRIPT_FILE)
 
+    # Game state dictionary
     game_state = {
-        "game_speed_factor": 1.0,
-        "slowmo_end_time": 0,
+        "game_speed_factor": 1.0, # Current multiplier for game speed
+        "slowmo_end_time": 0,     # Time (in t_sec) when current slowmo should end
         "pending_slowmo_factor": 1.0,
         "pending_slowmo_duration": 0,
         "pending_slowmo_activate_time": 0
     }
 
     orbs = []
+    pickups = [] # Initialize pickups list here
+    saws = [] # Initialize saws list here (though it's not directly in context, good practice)
+
+    # Create the context that director and physics callbacks will use
+    # This instance holds references to game objects and state that events might modify.
+    battle_context = MainBattleContext(
+        screen, space, pickups, # pickups must be initialized before this
+        saw_token_img, heart_token_img, blade_img, 
+        active_text_overlays, default_font, game_state, orbs,
+        slow_mo_start_sfx, slow_mo_end_sfx,
+        health_boost_sfx, hit_normal_sfx, hit_blade_sfx
+    )
+
     for orb_cfg in cfg["orbs"]:
         img = pygame.image.load(orb_cfg["logo"]).convert_alpha()
         img = pygame.transform.smoothscale(img, (120, 120))
 
         orb = Orb(orb_cfg["name"], img, None, None, orb_cfg["max_hp"])
         orb.attach_shape(space, radius=60)
-        orbs.append(orb)
+        orbs.append(orb) # Orbs list is populated here, context already has a reference to the empty list
 
-    register_orb_collisions(space)
-    register_saw_hits(space)
-    register_pickup_handler(space)
-    saws = []
-    pickups = []
-
-    battle_context = MainBattleContext(
-        screen, space, pickups, 
-        saw_token_img, heart_token_img, 
-        active_text_overlays, default_font, game_state, orbs
-    )
+    register_orb_collisions(space, battle_context)  # Pass context
+    register_saw_hits(space, battle_context)      # Pass context
+    register_pickup_handler(space, battle_context) # Pass context
+    # saws = [] # Moved up
+    # pickups = [] # Moved up
 
     frames, winner = [], None
     for frame_idx in range(int(DURATION * FPS)):
@@ -92,15 +117,18 @@ def main():
                 game_state["game_speed_factor"] = game_state["pending_slowmo_factor"]
                 game_state["slowmo_end_time"] = game_state["pending_slowmo_activate_time"] + game_state["pending_slowmo_duration"]
                 print(f"MainLoop: Slowmo activated at {t_sec:.2f}s, factor: {game_state['game_speed_factor']}, ends at: {game_state['slowmo_end_time']:.2f}s")
+                battle_context.start_slowmo_audio_effect(game_state['pending_slowmo_factor'])
             game_state["pending_slowmo_activate_time"] = 0
 
         if game_state["game_speed_factor"] < 1.0 and t_sec >= game_state["slowmo_end_time"]:
             game_state["game_speed_factor"] = 1.0
             game_state["slowmo_end_time"] = 0
             print(f"MainLoop: Slowmo ended at {t_sec:.2f}s")
+            battle_context.stop_slowmo_audio_effect()
         
         current_fps_factor = game_state["game_speed_factor"]
-        space.step(1 / (FPS * current_fps_factor))
+        dt_simulation = (1 / FPS) * current_fps_factor
+        space.step(dt_simulation)
 
         if t_sec >= SAW_TOKEN_T and not any(p.kind=='saw' for p in pickups):
             px = random.randint(60, ARENA_SIZE-60)
@@ -194,19 +222,33 @@ def main():
     print("Saved ->", video_path)
 
 class MainBattleContext:
-    def __init__(self, screen, space, pickups_list, 
-                 saw_token_img, heart_token_img, 
-                 active_text_overlays_list, default_font_instance, 
-                 game_state_dict, orbs_list):
+    def __init__(self, screen, space, pickups_list,
+                 saw_token_img, heart_token_img, blade_img,
+                 active_text_overlays_list, default_font_instance,
+                 game_state_dict, orbs_list,
+                 slow_mo_start_sfx=None, slow_mo_end_sfx=None,
+                 health_boost_sfx=None, hit_normal_sfx=None, hit_blade_sfx=None):
         self.screen = screen
         self.space = space
         self.pickups = pickups_list
         self.saw_token_img = saw_token_img
         self.heart_token_img = heart_token_img
+        self.blade_img = blade_img
         self.active_text_overlays = active_text_overlays_list
         self.default_font = default_font_instance
         self.game_state = game_state_dict
         self.orbs = orbs_list
+        self.slow_mo_start_sfx = slow_mo_start_sfx
+        self.slow_mo_end_sfx = slow_mo_end_sfx
+        self.health_boost_sfx = health_boost_sfx
+        self.hit_normal_sfx = hit_normal_sfx
+        self.hit_blade_sfx = hit_blade_sfx
+        # You might want to initialize an audio manager or pydub interface here
+        # self.audio_manager = MyAudioManager() 
+
+    def play_sfx(self, sfx_to_play):
+        if sfx_to_play:
+            sfx_to_play.play()
 
     def handle_spawn_pickup_event(self, payload):
         kind = payload.get("kind")
@@ -243,10 +285,17 @@ class MainBattleContext:
         duration = payload.get("duration", 2.0)
         event_time = payload.get("event_time")
         
-        self.game_state["pending_slowmo_factor"] = float(factor)
+        # Cap the slowmo factor
+        capped_factor = max(0.15, float(factor))
+
+        # Store the details from the event. The main loop will apply them when event_time is reached.
+        self.game_state["pending_slowmo_factor"] = capped_factor
         self.game_state["pending_slowmo_duration"] = float(duration)
         self.game_state["pending_slowmo_activate_time"] = event_time
-        print(f"Director: Queued Slowmo event - factor: {factor}, duration: {duration}, scheduled for {event_time}s")
+        print(f"Director: Queued Slowmo event - factor: {capped_factor:.2f} (original: {factor:.2f}), duration: {duration:.2f}s, scheduled for {event_time:.2f}s")
+        
+        # Placeholder for starting audio effect for slowmo
+        # self.start_slowmo_audio_effect(capped_factor) # Removed from here
 
     def handle_text_overlay_event(self, payload):
         text = payload.get("text", "Default Text")
@@ -277,6 +326,19 @@ class MainBattleContext:
         end_time = event_time + duration
         self.active_text_overlays.append({"surface": text_surface, "rect": rect, "end_time": end_time})
         print(f"Director: Text overlay '{text}' for {duration}s, from {event_time:.2f}s to {end_time:.2f}s")
+
+    # --- Conceptual Audio Handling Methods ---
+    def start_slowmo_audio_effect(self, factor):
+        print(f"AUDIO: Playing slow_mo_start.wav (factor: {factor:.2f})")
+        if self.slow_mo_start_sfx:
+            self.slow_mo_start_sfx.play()
+        # pass # Original pass removed
+
+    def stop_slowmo_audio_effect(self):
+        print("AUDIO: Playing slow_mo_end.wav")
+        if self.slow_mo_end_sfx:
+            self.slow_mo_end_sfx.play()
+        # pass # Original pass removed
 
 if __name__ == "__main__":
     main()
