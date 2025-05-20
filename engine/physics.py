@@ -53,7 +53,7 @@ def register_saw_hits(space, dmg=2):
 
 def register_pickup_handler(space):
     """
-    orb (1) touche pickup (3) → applique l’effet, supprime le token.
+    orb (1) touche pickup (3) → applique l'effet, supprime le token.
     """
     handler = space.add_collision_handler(1, 3)
 
@@ -65,11 +65,13 @@ def register_pickup_handler(space):
             return False
 
         if pickup.kind == 'saw':
-            # équipe l’orb d’une scie (si pas déjà)
+            # équipe l'orb d'une scie (si pas déjà)
             if not getattr(orb, "saw_equipped", None):
                 orb.saw_equipped = Saw(blade_img, orb, space)
                 globals()["active_saws"].append(orb.saw_equipped)
-        # d’autres kinds plus tard…
+        elif pickup.kind == 'heart':
+            orb.heal(2)
+        # d'autres kinds plus tard…
 
         pickup.destroy(space)
         return False  # on ne veut pas la physique standard

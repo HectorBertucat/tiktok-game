@@ -1,0 +1,34 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Project Overview: Battle Arena 60
+
+This project, **Battle Arena 60**, is a Python-based tool designed to generate engaging 60-70 second TikTok videos. These videos feature two branded "orbs" battling in a neon arena with power-ups and dynamic effects.
+
+## Key Components:
+
+*   **Main Script**: The core logic is likely in `[battle.py](mdc:battle.py)`.
+*   **Configuration**: Video parameters, orb details, and power-up timings are defined in YAML files located in the `[configs/](mdc:configs/)` directory. An example configuration can be found in `[configs/demo.yml](mdc:configs/demo.yml)`.
+*   **Assets**: Visual assets like logos and sprites are stored in the `[assets/](mdc:assets/)` directory. Specifically, orb logos can be found in `[assets/logos/](mdc:assets/logos/)`.
+*   **Game Engine**: The game utilizes Pygame for rendering and Pymunk for physics, likely within the `[engine/](mdc:engine/)` directory (if it exists, or integrated into `battle.py`).
+*   **Video Export**: Videos are exported to the `[export/](mdc:export/)` directory.
+
+## Core Functionality:
+
+*   **Rendering**: Pygame handles the 1080x1920 canvas and 60fps render loop.
+*   **Physics**: Pymunk manages interactions for circular bodies (orbs).
+*   **Game Objects**: Orbs have HP and can take damage. Power-ups like the "saw" can be picked up to enhance abilities.
+*   **Configuration**: YAML files in `[configs/](mdc:configs/)` control aspects like `seed`, `winner`, `duration`, orb properties (`name`, `logo`, `max_hp`), and pickup details (`kind`, `t`, `pos`).
+*   **CLI Usage**:
+    *   Single video: `python battle.py configs/your_config.yml`
+    *   Batch processing: `python battle.py --batch configs/*.yml`
+
+## Near-Term Development Focus:
+
+*   **S-3**: Heart pickup (+2 HP) & "Miss" particles.
+*   **S-4**: Director module for timeline events from YAML (`events:`).
+*   **S-5**: Camera shake, blood particles, slow-motion effects.
+
+This rule provides a foundational understanding of the project structure and its main goals.

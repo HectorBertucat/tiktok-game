@@ -37,6 +37,7 @@ def main():
     clock  = pygame.time.Clock()
     saw_token_img = pygame.image.load("assets/pickups/saw_token.png").convert_alpha()
     blade_img     = pygame.image.load("assets/pickups/blade.png").convert_alpha()
+    heart_token_img = pygame.image.load("assets/pickups/heart_token.png").convert_alpha()
     phys.blade_img = blade_img
 
     space = make_space((ARENA_SIZE, ARENA_SIZE))
@@ -66,10 +67,19 @@ def main():
         space.step(1 / FPS)
         t_sec = frame_idx / FPS
         if t_sec >= SAW_TOKEN_T and not any(p.kind=='saw' for p in pickups):
-            # position aléa dans l’arène
+            # position aléa dans l'arène
             px = random.randint(60, ARENA_SIZE-60)
             py = random.randint(60, ARENA_SIZE-60)
             pickup = Pickup('saw', saw_token_img, (px, py), space)
+            pickups.append(pickup)
+
+        # Spawn heart pickups (less frequent than saw tokens)
+        # Check if it's time to spawn a heart and if no heart pickup already exists
+        HEART_TOKEN_T = SAW_TOKEN_T * 2 # Example: hearts spawn half as often as saws
+        if t_sec >= HEART_TOKEN_T and not any(p.kind == 'heart' for p in pickups) and random.random() < 0.25: # Adjust probability as needed
+            px = random.randint(60, ARENA_SIZE - 60)
+            py = random.randint(60, ARENA_SIZE - 60)
+            pickup = Pickup('heart', heart_token_img, (px, py), space)
             pickups.append(pickup)
 
         # update saws
@@ -91,8 +101,34 @@ def main():
         # 1) barres de vie (marge haute)
         for i, orb in enumerate(orbs):
             draw_top_hp_bar(screen, orb, index=i, y=SAFE_TOP // 2)
+            if orb.heal_effect_active:
+                # Flash effect: change color and slightly scale the bar
+                # This is a simple version. You might want a more complex animation.
+                flash_color = (0, 255, 0) # Green flash
+                original_bar_w, original_bar_h = 360, 14 # Assuming these are the default values from draw_top_hp_bar
+                scaled_bar_w, scaled_bar_h = int(original_bar_w * 1.1), int(original_bar_h * 1.1)
 
-        # 2) cadre rose de l’arène
+                # Calculate position for the scaled bar to keep it centered
+                bar_w, bar_h = 360, 14 # from draw_top_hp_bar
+                seg_w = screen.get_width() // 2 # Assuming 2 orbs from draw_top_hp_bar total=2 default
+                original_x = i * seg_w + (seg_w - bar_w) // 2
+                original_y = SAFE_TOP // 2
+
+                scaled_x = original_x - (scaled_bar_w - original_bar_w) // 2
+                scaled_y = original_y - (scaled_bar_h - original_bar_h) // 2
+
+                pct = orb.hp / orb.max_hp
+                bg_rect = pygame.Rect(scaled_x, scaled_y, scaled_bar_w, scaled_bar_h)
+                fg_rect = pygame.Rect(scaled_x, scaled_y, int(scaled_bar_w * pct), scaled_bar_h)
+
+                pygame.draw.rect(screen, (60,60,60), bg_rect, border_radius=5)
+                pygame.draw.rect(screen, flash_color, fg_rect, border_radius=5)
+
+                orb.heal_effect_timer -= 1
+                if orb.heal_effect_timer <= 0:
+                    orb.heal_effect_active = False
+
+        # 2) cadre rose de l'arène
         pygame.draw.rect(
             screen, (255, 0, 90),
             (ARENA_X0, ARENA_Y0, ARENA_SIZE, ARENA_SIZE), width=6)

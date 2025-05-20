@@ -10,6 +10,8 @@ class Orb:
     shape: pymunk.Circle
     max_hp: int = 6
     hp: int = field(init=False)
+    heal_effect_active: bool = field(init=False, default=False)
+    heal_effect_timer: int = field(init=False, default=0)
 
     def __post_init__(self):
         self.hp = self.max_hp
@@ -22,6 +24,11 @@ class Orb:
 
     def take_hit(self, dmg=1):
         self.hp = max(0, self.hp - dmg)
+
+    def heal(self, amount=2):
+        self.hp = min(self.max_hp, self.hp + amount)
+        self.heal_effect_active = True
+        self.heal_effect_timer = 10 # Number of frames for the effect
 
     def attach_shape(self, space, radius):
         """Crée le body + shape et lie la shape à self (pour collisions)."""
@@ -40,7 +47,7 @@ class Orb:
 
 class Pickup:
     """
-    Objet au sol qu’un orb peut ramasser.
+    Objet au sol qu'un orb peut ramasser.
     kind: 'saw', 'heart', etc.
     """
     def __init__(self, kind, img_surface, pos, space):
@@ -91,7 +98,7 @@ class Saw:
         self.body, self.shape = body, shape
 
     def update(self, dt):
-        # tourne en place, suit l’orb
+        # tourne en place, suit l'orb
         self.angle += self.omega * dt
         self.body.position = self.owner.body.position
         self.sprite = pygame.transform.rotate(self.sprite_orig, -self.angle)
