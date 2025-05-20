@@ -28,3 +28,22 @@ def register_orb_collisions(space, dmg=1):
         o2.take_hit(dmg)
 
     handler.post_solve = post_solve
+
+
+def register_saw_hits(space, dmg=2):
+    """
+    orb (1) touche scie (2) —> celui qui n'est PAS le propriétaire perd dmg HP
+    """
+    handler = space.add_collision_handler(1, 2)
+
+    def post_solve(arbiter, _space, _data):
+        shape_a, shape_b = arbiter.shapes
+        # identifie qui est le saw, qui est l'orb
+        saw   = shape_a.saw_ref if hasattr(shape_a, "saw_ref") else shape_b.saw_ref
+        orb   = shape_a.orb_ref if hasattr(shape_a, "orb_ref") else shape_b.orb_ref
+        if orb == saw.owner or not saw.alive:
+            return           # on touche son propre porteur => rien
+        orb.take_hit(dmg)
+        saw.destroy(space)   # one-shot
+
+    handler.post_solve = post_solve

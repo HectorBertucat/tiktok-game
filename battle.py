@@ -1,13 +1,12 @@
 # battle.py – tout en haut
-import pygame, random
+import pygame, random, math
 from moviepy import ImageSequenceClip
-import pymunk
 from pathlib import Path
 from ruamel.yaml import YAML
 import numpy as np
 
-from engine.game_objects import Orb
-from engine.physics import make_space, register_orb_collisions
+from engine.game_objects import Orb, Saw
+from engine.physics import make_space, register_orb_collisions, register_saw_hits
 from engine.renderer import draw_top_hp_bar, surface_to_array
 
 # --- Layout 1080 × 1920 ---
@@ -16,7 +15,7 @@ SAFE_TOP    = 220
 ARENA_SIZE  = 1080
 ARENA_X0    = (CANVAS_W - ARENA_SIZE)
 ARENA_Y0    = SAFE_TOP + 80
-
+SAW_SPAWN_T = 5
 CFG = Path("configs/demo.yml")
 OUT = Path("export")
 FPS = 60
@@ -34,6 +33,7 @@ def main():
 
     screen = pygame.display.set_mode((CANVAS_W, CANVAS_H))
     clock  = pygame.time.Clock()
+    saw_img = pygame.image.load("assets/fx/blade.png").convert_alpha()
 
     space = make_space((ARENA_SIZE, ARENA_SIZE))
 
@@ -47,6 +47,8 @@ def main():
         orbs.append(orb)
 
     register_orb_collisions(space)
+    register_saw_hits(space)
+    saws = []
 
     frames, winner = [], None
     for frame_idx in range(int(DURATION * FPS)):
@@ -56,6 +58,18 @@ def main():
                 pygame.quit(); return
 
         space.step(1 / FPS)
+        t_sec = frame_idx / FPS
+        # SPAWN une scie unique à 5 s
+        if t_sec >= SAW_SPAWN_T and not saws:
+            owner = random.choice(orbs)
+            saws.append(Saw(saw_img, owner, space))
+
+        # update/clean saws
+        for s in saws[:]:
+            if not s.alive:
+                saws.remove(s)
+            else:
+                s.update(1 / FPS)
 
         # Check defeat
         living = [o for o in orbs if o.hp > 0]
@@ -79,6 +93,10 @@ def main():
         for orb in orbs:
             if orb.hp > 0:
                 orb.draw(screen, offset=(ARENA_X0, ARENA_Y0))
+
+        # 4) saws
+        for s in saws:
+            s.draw(screen, offset=(ARENA_X0, ARENA_Y0))
 
         # 4) célébration du vainqueur
         if winner:
