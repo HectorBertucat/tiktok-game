@@ -15,9 +15,9 @@ class Orb:
     def __post_init__(self):
         self.hp = self.max_hp
 
-    def draw(self, screen):
-        x, y = self.body.position
-        radius = int(self.shape.radius)
+    def draw(self, screen, offset=(0, 0)):
+        x = self.body.position.x + offset[0]
+        y = self.body.position.y + offset[1]
         rect = self.logo_surface.get_rect(center=(x, y))
         screen.blit(self.logo_surface, rect)
 

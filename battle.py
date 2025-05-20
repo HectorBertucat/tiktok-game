@@ -1,18 +1,26 @@
-# battle.py
+# battle.py – tout en haut
 import pygame, random
-from moviepy import ImageSequenceClip, VideoFileClip, TextClip, CompositeVideoClip
+from moviepy import ImageSequenceClip
 import pymunk
 from pathlib import Path
 from ruamel.yaml import YAML
 import numpy as np
+
 from engine.game_objects import Orb
 from engine.physics import make_space, register_orb_collisions
-from engine.renderer import draw_hp_bar, surface_to_array
+from engine.renderer import draw_top_hp_bar, surface_to_array
+
+# --- Layout 1080 × 1920 ---
+CANVAS_W, CANVAS_H = 1080, 1920
+SAFE_TOP    = 220
+ARENA_SIZE  = 1080
+ARENA_X0    = (CANVAS_W - ARENA_SIZE)
+ARENA_Y0    = SAFE_TOP + 80
 
 CFG = Path("configs/demo.yml")
 OUT = Path("export")
 FPS = 60
-DURATION = 10        # on vise 10 s pour tester
+DURATION = 70        # on vise 10 s pour tester
 
 def load_cfg(path):
     yaml = YAML(typ="safe")
@@ -23,17 +31,19 @@ def main():
     random.seed(cfg["seed"])
 
     pygame.init()
-    W, H = cfg["arena"]["size"]
-    screen = pygame.display.set_mode((W, H))
-    clock = pygame.time.Clock()
 
-    space = make_space((W, H))
+    screen = pygame.display.set_mode((CANVAS_W, CANVAS_H))
+    clock  = pygame.time.Clock()
+
+    space = make_space((ARENA_SIZE, ARENA_SIZE))
+
     orbs = []
     for orb_cfg in cfg["orbs"]:
         img = pygame.image.load(orb_cfg["logo"]).convert_alpha()
         img = pygame.transform.smoothscale(img, (120, 120))
+
         orb = Orb(orb_cfg["name"], img, None, None, orb_cfg["max_hp"])
-        orb.attach_shape(space, radius=60)        # ← nouveau
+        orb.attach_shape(space, radius=60)
         orbs.append(orb)
 
     register_orb_collisions(space)
@@ -53,21 +63,32 @@ def main():
             winner = living[0]
             win_frame = frame_idx
 
+                # ----- DRAW -----
         screen.fill((20, 20, 20))
+
+        # 1) barres de vie (marge haute)
+        for i, orb in enumerate(orbs):
+            draw_top_hp_bar(screen, orb, index=i, y=SAFE_TOP // 2)
+
+        # 2) cadre rose de l’arène
+        pygame.draw.rect(
+            screen, (255, 0, 90),
+            (ARENA_X0, ARENA_Y0, ARENA_SIZE, ARENA_SIZE), width=6)
+
+        # 3) orbs à l’intérieur (offset)
         for orb in orbs:
             if orb.hp > 0:
-                orb.draw(screen)
-            draw_hp_bar(screen, orb)
+                orb.draw(screen, offset=(ARENA_X0, ARENA_Y0))
 
-        # Affichage logo gagnant pendant 2 s
+        # 4) célébration du vainqueur
         if winner:
             if frame_idx - win_frame < 2 * FPS:
                 giant = pygame.transform.smoothscale(
                     winner.logo_surface, (300, 300))
-                rect = giant.get_rect(center=(W//2, H//2))
+                rect = giant.get_rect(center=(CANVAS_W//2, CANVAS_H//2))
                 screen.blit(giant, rect)
             else:
-                break  # on stoppe la capture une fois la célébration finie
+                break
 
         pygame.display.flip()
         frames.append(surface_to_array(screen).copy())
