@@ -1,7 +1,9 @@
-events:
-  - { t: 2,  type: spawn_pickup, kind: "heart", x: 0.5, y: 0.5 } # Relative to arena size
-  - { t: 3,  type: spawn_pickup, kind: "saw", x: 200, y: 300 }   # Absolute pixels in arena
-  - { t: 5,  type: text_overlay, text: "Slow Mo Incoming!", duration: 2, position: "top_center", font_size: 60 }
-  - { t: 7, type: slowmo, factor: 0.3, duration: 4 }
-  - { t: 12, type: text_overlay, text: "TEST!", duration: 3, position: [0.5, 0.2], color: [255,50,50] } # Relative to canvas, red
-  - { t: 15, type: spawn_pickup, kind: "heart" } # Random position
+    events:
+      - { t: 2,  type: spawn_pickup, kind: "heart", x: 0.5, y: 0.5 }
+      - { t: 3,  type: spawn_pickup, kind: "saw", x: 200, y: 300 }
+      - { t: 5,  type: text_overlay, text: "Slow Mo Incoming!", duration: 2, position: "top_center", font_size: 60 }
+      - { t: 7, type: slowmo, factor: 0.3, duration: 4 }
+      - { t: 10, type: spawn_pickup, kind: "shield" } # Spawns shield at random position
+      - { t: 12, type: text_overlay, text: "TEST!", duration: 3, position: [0.5, 0.2], color: [255,50,50] }
+      - { t: 15, type: spawn_pickup, kind: "bomb", x: 0.25, y: 0.75 }
+      - { t: 20, type: spawn_pickup, kind: "freeze", y: 0.5 } # Spawns freeze at random x, specific y

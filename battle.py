@@ -4,11 +4,15 @@ from moviepy import ImageSequenceClip
 from pathlib import Path
 from ruamel.yaml import YAML
 import numpy as np
+import pymunk
 
 from director import Director
 from engine.game_objects import Orb, Saw, Pickup
 import engine.physics as phys
-from engine.physics import make_space, register_orb_collisions, register_saw_hits, register_pickup_handler, active_saws
+from engine.physics import (
+    make_space, register_orb_collisions, register_saw_hits,
+    register_pickup_handler, active_saws
+)
 from engine.renderer import draw_top_hp_bar, surface_to_array, Camera
 from engine.effects import ParticleEmitter
 
@@ -18,7 +22,6 @@ SAFE_TOP    = 220
 ARENA_SIZE  = 1080 # This will be the width and height of the square arena
 ARENA_W = ARENA_SIZE
 ARENA_H = ARENA_SIZE
-# ARENA_X0    = (CANVAS_W - ARENA_SIZE) # Old calculation
 ARENA_X0    = (CANVAS_W - ARENA_W) // 2 # Centered horizontally
 ARENA_Y0    = SAFE_TOP + 80
 SAW_SPAWN_T = 5
@@ -48,6 +51,10 @@ def main():
         health_boost_sfx = pygame.mixer.Sound("assets/sfx/health_boost.wav")
         hit_normal_sfx = pygame.mixer.Sound("assets/sfx/hit_normal.wav")
         hit_blade_sfx = pygame.mixer.Sound("assets/sfx/hit_blade.wav")
+        # New SFX
+        bomb1_sfx = pygame.mixer.Sound("assets/sfx/bomb1.wav")
+        bomb_sfx = pygame.mixer.Sound("assets/sfx/bomb.wav")
+        shield_pickup_sfx = pygame.mixer.Sound("assets/sfx/shield.wav")
     except pygame.error as e:
         print(f"Warning: Could not load SFX - {e}")
         slow_mo_start_sfx = None
@@ -55,6 +62,9 @@ def main():
         health_boost_sfx = None
         hit_normal_sfx = None
         hit_blade_sfx = None
+        bomb1_sfx = None
+        bomb_sfx = None
+        shield_pickup_sfx = None
 
     default_font = pygame.font.SysFont(None, 48)
     active_text_overlays = []
@@ -64,8 +74,11 @@ def main():
     screen = pygame.display.set_mode((CANVAS_W, CANVAS_H))
     clock  = pygame.time.Clock()
     saw_token_img = pygame.image.load("assets/pickups/saw_token.png").convert_alpha()
-    blade_img     = pygame.image.load("assets/pickups/blade.png").convert_alpha()
     heart_token_img = pygame.image.load("assets/pickups/heart_token.png").convert_alpha()
+    blade_img     = pygame.image.load("assets/pickups/blade.png").convert_alpha()
+    shield_token_img = pygame.image.load("assets/pickups/shield_token.webp").convert_alpha()
+    bomb_token_img = pygame.image.load("assets/pickups/bomb_token.png").convert_alpha()
+    freeze_token_img = pygame.image.load("assets/pickups/ice_token.webp").convert_alpha()
     phys.blade_img = blade_img
 
     space = make_space((ARENA_W, ARENA_H))
@@ -88,10 +101,11 @@ def main():
     # This instance holds references to game objects and state that events might modify.
     battle_context = MainBattleContext(
         screen, space, pickups, # pickups must be initialized before this
-        saw_token_img, heart_token_img, blade_img, 
+        saw_token_img, heart_token_img, shield_token_img, bomb_token_img, freeze_token_img, blade_img, 
         active_text_overlays, default_font, game_state, orbs,
         slow_mo_start_sfx, slow_mo_end_sfx,
         health_boost_sfx, hit_normal_sfx, hit_blade_sfx,
+        bomb1_sfx, bomb_sfx, shield_pickup_sfx, # Added new SFX to context
         camera, particle_emitter
     )
 
@@ -111,53 +125,82 @@ def main():
     # pickups = [] # Moved up
 
     frames, winner = [], None
+    current_game_time_sec = 0.0 # Initialize current game time
+
     for frame_idx in range(int(DURATION * FPS)):
+        previous_game_time_sec = current_game_time_sec
+        current_game_time_sec = frame_idx / FPS
+        battle_context.current_game_time_sec = current_game_time_sec # Update context
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit(); return
 
-        t_sec = frame_idx / FPS
+        director.tick(current_game_time_sec, battle_context)
 
-        director.tick(t_sec, battle_context)
-
-        if game_state["pending_slowmo_activate_time"] > 0 and t_sec >= game_state["pending_slowmo_activate_time"]:
+        if game_state["pending_slowmo_activate_time"] > 0 and current_game_time_sec >= game_state["pending_slowmo_activate_time"]:
             if game_state["game_speed_factor"] == 1.0:
                 game_state["game_speed_factor"] = game_state["pending_slowmo_factor"]
                 game_state["slowmo_end_time"] = game_state["pending_slowmo_activate_time"] + game_state["pending_slowmo_duration"]
-                print(f"MainLoop: Slowmo activated at {t_sec:.2f}s, factor: {game_state['game_speed_factor']}, ends at: {game_state['slowmo_end_time']:.2f}s")
+                print(f"MainLoop: Slowmo activated at {current_game_time_sec:.2f}s, factor: {game_state['game_speed_factor']}, ends at: {game_state['slowmo_end_time']:.2f}s")
                 battle_context.start_slowmo_audio_effect(game_state['pending_slowmo_factor'])
             game_state["pending_slowmo_activate_time"] = 0
 
-        if game_state["game_speed_factor"] < 1.0 and t_sec >= game_state["slowmo_end_time"]:
+        if game_state["game_speed_factor"] < 1.0 and current_game_time_sec >= game_state["slowmo_end_time"]:
             game_state["game_speed_factor"] = 1.0
             game_state["slowmo_end_time"] = 0
-            print(f"MainLoop: Slowmo ended at {t_sec:.2f}s")
+            print(f"MainLoop: Slowmo ended at {current_game_time_sec:.2f}s")
             battle_context.stop_slowmo_audio_effect()
         
-        current_fps_factor = game_state["game_speed_factor"]
-        dt_simulation = (1 / FPS) * current_fps_factor
-        space.step(dt_simulation)
-        camera.update(dt_simulation)
-        particle_emitter.update(dt_simulation)
+        current_simulation_fps_factor = game_state["game_speed_factor"]
+        # Actual time passed for game logic and physics, affected by slow-mo
+        # dt_frame = (current_game_time_sec - previous_game_time_sec) # More accurate dt
+        # If FPS is super stable, (1/FPS) is fine. If there can be frame drops, use actual time delta.
+        # For now, using the original dt_simulation which is scaled 1/FPS
+        dt_logic = (1 / FPS) * current_simulation_fps_factor
 
-        if t_sec >= SAW_TOKEN_T and not any(p.kind=='saw' for p in pickups):
-            px = random.randint(60, ARENA_W - 60)
-            py = random.randint(60, ARENA_H - 60)
-            pickup = Pickup('saw', saw_token_img, (px, py), space)
-            pickups.append(pickup)
+        # Handle Frozen Orbs: ensure their velocity is zero if they are kinematic due to freeze
+        for orb in orbs:
+            if orb.is_frozen and orb.body.body_type == pymunk.Body.KINEMATIC:
+                orb.body.velocity = (0, 0)
+                orb.body.angular_velocity = 0 # Also zero angular velocity
+            # The old logic for unfreezing based on orb.frozen_until > current_game_time_sec is removed.
+            # Unfreezing is now handled by collision callbacks in physics.py.
 
-        HEART_TOKEN_T = SAW_TOKEN_T * 2
-        if t_sec >= HEART_TOKEN_T and not any(p.kind == 'heart' for p in pickups) and random.random() < 0.25:
-            px = random.randint(60, ARENA_W - 60)
-            py = random.randint(60, ARENA_H - 60)
-            pickup = Pickup('heart', heart_token_img, (px, py), space)
-            pickups.append(pickup)
+        space.step(dt_logic)
+        
+        camera.update(dt_logic)
+        particle_emitter.update(dt_logic)
 
-        for s in active_saws[:]:
-            if not s.alive:
-                active_saws.remove(s)
-            else:
-                s.update(1 / FPS)
+        # Update active saws
+        for s in phys.active_saws[:]:
+            if not s.alive: # Saw might have been destroyed by hit or owner death
+                if s in phys.active_saws: # Check if still in list before removing
+                     phys.active_saws.remove(s)
+                continue
+            # s.update() will call s.destroy() if owner is dead, which clears owner.has_saw
+            s.update(dt_logic) 
+            if not s.alive and s in phys.active_saws: # Re-check after update, if it self-destroyed
+                phys.active_saws.remove(s)
+
+        # phys.handle_bomb_explosions(...) is removed as bombs are instant.
+
+        # --- Temporary test spawners (replace with director events) ---
+        if "pickups" not in cfg: # Fallback if not in demo.yml
+            if current_game_time_sec >= SAW_TOKEN_T and not any(p.kind=='saw' for p in pickups) and len(pickups) == 0:
+                px = random.randint(60, ARENA_W - 60)
+                py = random.randint(60, ARENA_H - 60)
+                pickup = Pickup('saw', saw_token_img, (px, py), space)
+                pickups.append(pickup)
+
+            HEART_TOKEN_T = SAW_TOKEN_T * 1.5 # Example
+            if current_game_time_sec >= HEART_TOKEN_T and not any(p.kind == 'heart' for p in pickups) and len(pickups) <= 1:
+                 if random.random() < 0.5: # Chance to spawn
+                    px = random.randint(60, ARENA_W - 60)
+                    py = random.randint(60, ARENA_H - 60)
+                    pickup = Pickup('heart', heart_token_img, (px, py), space)
+                    pickups.append(pickup)
+        # --- End temporary spawners ---
 
         living = [o for o in orbs if o.hp > 0]
         if winner is None and len(living) == 1:
@@ -204,7 +247,7 @@ def main():
         effective_arena_offset_for_particles = pygame.math.Vector2(arena_render_offset_x, arena_render_offset_y)
         particle_emitter.draw(screen, effective_arena_offset_for_particles)
 
-        current_time_for_overlay = frame_idx / FPS
+        current_time_for_overlay = current_game_time_sec
         for overlay in active_text_overlays[:]:
             if current_time_for_overlay < overlay["end_time"]:
                 screen.blit(overlay["surface"], overlay["rect"])
@@ -213,7 +256,7 @@ def main():
 
         for p in pickups:
             p.draw(screen, offset=(arena_render_offset_x, arena_render_offset_y))
-        for s in active_saws:
+        for s in phys.active_saws:
             s.draw(screen, offset=(arena_render_offset_x, arena_render_offset_y))
         for orb_to_draw in orbs:
             if orb_to_draw.hp > 0:
@@ -241,17 +284,21 @@ def main():
 
 class MainBattleContext:
     def __init__(self, screen, space, pickups_list,
-                 saw_token_img, heart_token_img, blade_img,
+                 saw_token_img, heart_token_img, shield_token_img, bomb_token_img, freeze_token_img, blade_img,
                  active_text_overlays_list, default_font_instance,
                  game_state_dict, orbs_list,
                  slow_mo_start_sfx=None, slow_mo_end_sfx=None,
                  health_boost_sfx=None, hit_normal_sfx=None, hit_blade_sfx=None,
+                 bomb1_sfx=None, bomb_sfx=None, shield_pickup_sfx=None, # Added new SFX params
                  camera_instance=None, particle_emitter_instance=None):
         self.screen = screen
         self.space = space
         self.pickups = pickups_list
         self.saw_token_img = saw_token_img
         self.heart_token_img = heart_token_img
+        self.shield_token_img = shield_token_img
+        self.bomb_token_img = bomb_token_img
+        self.freeze_token_img = freeze_token_img
         self.blade_img = blade_img
         self.active_text_overlays = active_text_overlays_list
         self.default_font = default_font_instance
@@ -262,8 +309,13 @@ class MainBattleContext:
         self.health_boost_sfx = health_boost_sfx
         self.hit_normal_sfx = hit_normal_sfx
         self.hit_blade_sfx = hit_blade_sfx
+        # New SFX assignments
+        self.bomb1_sfx = bomb1_sfx
+        self.bomb_sfx = bomb_sfx
+        self.shield_pickup_sfx = shield_pickup_sfx
         self.camera = camera_instance
         self.particle_emitter = particle_emitter_instance
+        self.current_game_time_sec = 0.0 # Added to context
         # You might want to initialize an audio manager or pydub interface here
         # self.audio_manager = MyAudioManager() 
 
@@ -285,14 +337,20 @@ class MainBattleContext:
         final_x = int(px * ARENA_W) if not x_is_abs and isinstance(px, float) and 0 <= px <= 1 else int(px)
         final_y = int(py * ARENA_H) if not y_is_abs and isinstance(py, float) and 0 <= py <= 1 else int(py)
         
-        final_x = max(60, min(ARENA_W - 60, final_x))
-        final_y = max(60, min(ARENA_H - 60, final_y))
+        final_x = max(40, min(ARENA_W - 40, final_x))
+        final_y = max(40, min(ARENA_H - 40, final_y))
 
         img = None
         if kind == "saw":
             img = self.saw_token_img
         elif kind == "heart":
             img = self.heart_token_img
+        elif kind == "shield":
+            img = self.shield_token_img
+        elif kind == "bomb":
+            img = self.bomb_token_img
+        elif kind == "freeze":
+            img = self.freeze_token_img
         
         if img:
             pickup = Pickup(kind, img, (final_x, final_y), self.space)
