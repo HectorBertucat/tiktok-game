@@ -439,8 +439,10 @@ def main():
 
         screen.fill((20, 20, 20))
 
-        for i, orb in enumerate(orbs):
-            draw_top_hp_bar(screen, orb, index=i, y=SAFE_TOP // 2)
+        # Draw HP bars at the top
+        for i, orb in enumerate(battle_context.orbs):
+            # The 'y' parameter is no longer needed as it's calculated internally by draw_top_hp_bar
+            draw_top_hp_bar(screen, orb, index=i, total_orbs=len(battle_context.orbs))
             if orb.heal_effect_active:
                 flash_color = (0, 255, 0)
                 original_bar_w, original_bar_h = 360, 14

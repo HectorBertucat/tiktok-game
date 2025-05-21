@@ -166,33 +166,43 @@ def register_saw_hits(space, battle_context, dmg=1):
         saw = saw_shape.saw_ref
         orb_hit_by_saw = orb_shape.orb_ref
 
-        # If the orb hit by the saw is frozen, it unfreezes post-step.
-        # if orb_hit_by_saw.is_frozen:
-        #     print(f"DEBUG: Orb '{orb_hit_by_saw.name}' (frozen) hit by Saw from '{saw.owner.name if saw.owner else 'N/A'}'. Scheduling unfreeze.")
-        #     space.add_post_step_callback(_unfreeze_orb_post_step, (id(orb_hit_by_saw), "unfreeze"), orb_hit_by_saw)
-
-        # Standard saw hit logic (damage, effects, saw destruction)
         if orb_hit_by_saw == saw.owner or not saw.alive:
             return
         
-        # If saw owner is frozen, the saw should still work (it's kinematic)
-        # If the target orb is frozen, it still takes damage. Repulsion is skipped if kinematic.
+        was_shielded_at_impact = orb_hit_by_saw.is_shielded
+
+        # Process the actual hit and shield interaction
+        orb_hit_by_saw.take_hit(dmg) # This might change orb_hit_by_saw.is_shielded
+
+        # Determine particle color and sound based on whether the shield took the hit
+        if was_shielded_at_impact:
+            particle_base_color = (173, 216, 230)  # Light Blue
+            particle_fade_color = (70, 130, 180)   # Steel Blue
+            # Optionally, play a specific shield hit sound here if available
+            # e.g., battle_context.play_sfx(battle_context.shield_block_sfx)
+        else:
+            particle_base_color = (255, 20, 20)    # Bright Red
+            particle_fade_color = (100, 0, 0)      # Darker Red
+            battle_context.play_sfx(battle_context.hit_blade_sfx) # Play normal hit sound only if no shield took the hit
+
+        battle_context.camera.shake(intensity=8, duration=0.25) # Shake camera regardless
 
         emission_pos_orb = orb_hit_by_saw.body.position
         contact_points = arbiter.contact_point_set.points
         if contact_points:
             emission_pos_orb = pygame.math.Vector2(contact_points[0].point_a.x, contact_points[0].point_a.y)
 
-        orb_hit_by_saw.take_hit(dmg)
-        battle_context.play_sfx(battle_context.hit_blade_sfx)
-        battle_context.camera.shake(intensity=8, duration=0.25)
         if battle_context.particle_emitter:
-            battle_context.particle_emitter.emit(num_particles=70, position=emission_pos_orb,
-                                                 base_particle_color=(255,20,20), # Bright Red
-                                                 fade_to_color=(100,0,0), # Darker Red
-                                                 base_velocity_scale=220, # Increased from 90
-                                                 lifespan_s=0.7,
-                                                 base_max_radius=28) # Increased from 18
+            battle_context.particle_emitter.emit(
+                num_particles=70, 
+                position=emission_pos_orb,
+                base_particle_color=particle_base_color,
+                fade_to_color=particle_fade_color,
+                base_velocity_scale=220, 
+                lifespan_s=0.7,
+                base_max_radius=28
+            )
+        
         saw.destroy() # Call new destroy without space arg
 
     handler.post_solve = post_solve
