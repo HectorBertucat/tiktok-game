@@ -47,7 +47,7 @@ class Orb:
             shield_color_outline = (0, 0, 255)  # Blue outline
             shield_color_fill = (100, 100, 255, 77) # Lighter blue fill, 77/255 opacity (~30%)
             # Make shield visually larger
-            shield_radius = int(self.shape.radius + 12) # Increased from +6 to +12
+            shield_radius = int(self.shape.radius + 28) # Increased from +6 to +12
 
             # Create a temporary surface for alpha blending the shield fill
             shield_surface = pygame.Surface((shield_radius * 2, shield_radius * 2), pygame.SRCALPHA)

@@ -78,14 +78,76 @@ def register_orb_collisions(space, battle_context, dmg=1):
         return True # Continue with normal collision resolution
 
     def post_solve(arbiter, _space, _data):
-        orb_a, orb_b = arbiter.shapes[0].orb_ref, arbiter.shapes[1].orb_ref
+        orb_a_shape, orb_b_shape = arbiter.shapes
+        orb_a = orb_a_shape.orb_ref
+        orb_b = orb_b_shape.orb_ref
+
+        if battle_context.particle_emitter and arbiter.is_first_contact:
+            if not arbiter.contact_point_set.points:
+                # print("DEBUG: No contact points for orb-orb particle emission.")
+                return
+
+            contact_point_data = arbiter.contact_point_set.points[0]
+            contact_pos_vec = pygame.math.Vector2(contact_point_data.point_a.x, contact_point_data.point_a.y)
+            
+            # Normal points from B to A. Particles should generally go along this normal for orb_a,
+            # and opposite for orb_b if we want them to spray from both.
+            # For simplicity, let's make them spray outwards from the contact point, influenced by the normal.
+            collision_normal = pygame.math.Vector2(arbiter.normal.x, arbiter.normal.y)
+            impact_strength = arbiter.total_impulse.length
+
+            # Scale number of particles by average orb radius (or could be sum, or max)
+            # Define a base radius for scaling, e.g., the default radius from config if available
+            # or a sensible default like 60.
+            base_orb_radius_for_scaling = battle_context.orb_radius_cfg or 60 
+            avg_orb_radius = (orb_a.shape.radius + orb_b.shape.radius) / 2
+            radius_ratio = avg_orb_radius / base_orb_radius_for_scaling
+            
+            # Total of around 30 particles, scaled by orb size ratio
+            total_collision_particles = int(30 * radius_ratio)
+            if total_collision_particles < 10: total_collision_particles = 10 # Minimum 10 particles
+            particles_per_side = total_collision_particles // 2
+            if particles_per_side <= 0: particles_per_side = 5 # Min 5 per side if total is low
+
+            # Make particles red, fading to darker red
+            particle_color = (255, 20, 20) # Bright Red
+            fade_color = (60, 0, 0)    # Dark Red/Almost Black
+
+            # Define particle properties for the splash
+            # Significantly increased base_velocity_scale for a bigger splash
+            # Base max radius will be scaled by orb_radius_ratio in emit()
+            orb_collision_base_velocity = 250 + (impact_strength / 500.0) # Very high velocity, influenced by impact
+            orb_collision_lifespan = 0.6 * radius_ratio # Scale lifespan with orb size
+            orb_collision_max_radius = 10 # Base max radius for particles, will be scaled by orb_radius_ratio in emit
+
+            # Emit particles for orb_a (impact_normal is arbiter.normal)
+            battle_context.particle_emitter.emit(
+                num_particles=particles_per_side, 
+                position=contact_pos_vec,
+                base_particle_color=(255,255,255), # White
+                fade_to_color=(150,150,150), # Light Grey
+                base_velocity_scale=orb_collision_base_velocity, 
+                lifespan_s=orb_collision_lifespan,      
+                base_max_radius=orb_collision_max_radius, # Use new radius param       
+                impact_normal=collision_normal,     
+                impact_strength=impact_strength,
+                orb_radius_ratio=radius_ratio       
+            )
+            # Emit particles for orb_b (impact_normal is -arbiter.normal)
+            battle_context.particle_emitter.emit(
+                num_particles=particles_per_side, 
+                position=contact_pos_vec,
+                base_particle_color=(255,255,255), # White
+                fade_to_color=(150,150,150), # Light Grey
+                base_velocity_scale=orb_collision_base_velocity, 
+                lifespan_s=orb_collision_lifespan,      
+                base_max_radius=orb_collision_max_radius,  
+                impact_normal=-collision_normal,    
+                impact_strength=impact_strength,
+                orb_radius_ratio=radius_ratio
+            )
+
         # Unfreeze logic removed
-        # if orb_a.is_frozen:
-        #     print(f"DEBUG: Orb '{orb_a.name}' (frozen) hit by Orb '{orb_b.name}'. Scheduling unfreeze.")
-        #     space.add_post_step_callback(_unfreeze_orb_post_step, (id(orb_a), "unfreeze"), orb_a)
-        # if orb_b.is_frozen:
-        #     print(f"DEBUG: Orb '{orb_b.name}' (frozen) hit by Orb '{orb_a.name}'. Scheduling unfreeze.")
-        #     space.add_post_step_callback(_unfreeze_orb_post_step, (id(orb_b), "unfreeze"), orb_b)
         pass # Orb-orb collision bounce only, no damage etc.
 
     handler.post_solve = post_solve
@@ -126,9 +188,11 @@ def register_saw_hits(space, battle_context, dmg=1):
         battle_context.camera.shake(intensity=8, duration=0.25)
         if battle_context.particle_emitter:
             battle_context.particle_emitter.emit(num_particles=70, position=emission_pos_orb,
-                                                 base_particle_color=orb_hit_by_saw.outline_color,
-                                                 base_velocity_scale=90, lifespan_s=0.7,
-                                                 max_length=18, base_thickness=3)
+                                                 base_particle_color=(255,20,20), # Bright Red
+                                                 fade_to_color=(100,0,0), # Darker Red
+                                                 base_velocity_scale=220, # Increased from 90
+                                                 lifespan_s=0.7,
+                                                 base_max_radius=28) # Increased from 18
         saw.destroy() # Call new destroy without space arg
 
     handler.post_solve = post_solve
@@ -212,9 +276,10 @@ def register_pickup_handler(space, battle_context):
 
             if battle_context.particle_emitter:
                 battle_context.particle_emitter.emit(num_particles=150, position=pickup.body.position,
-                                                     base_particle_color=(255,100,0),
+                                                     base_particle_color=(255,255,255), # White
+                                                     fade_to_color=(100,100,100), # Dark Grey
                                                      base_velocity_scale=150, lifespan_s=1.2,
-                                                     max_length=30, base_thickness=5)
+                                                     base_max_radius=30) # Changed from max_length, removed base_thickness
 
             for orb_in_game in battle_context.orbs:
                 if orb_in_game.hp <= 0: continue

@@ -38,18 +38,18 @@ SAFETY_PERIOD_SECONDS = 61
 LOW_HEALTH_THRESHOLD = 1 # HP value at or below which emergency heart may spawn
 EMERGENCY_HEART_COOLDOWN_SECONDS = 10 # Min time between emergency hearts for the same orb
 EMERGENCY_HEART_PREDICTION_TIME_SECONDS = 0.75 # Predict 0.75s ahead for heart spawn
-ASSISTANCE_ITEM_COOLDOWN_SECONDS = 15 # Min time between assistance (saw/shield) items for the same orb under low HP
+ASSISTANCE_ITEM_COOLDOWN_SECONDS = 10 # Min time between assistance (saw/shield) items for the same orb under low HP
 
 # Unified Predictive Spawning Constants
-UNIFIED_SPAWN_INTERVAL_SECONDS = 5 # Try to spawn a pickup every X seconds
+UNIFIED_SPAWN_INTERVAL_SECONDS = 3 # Try to spawn a pickup every X seconds
 UNIFIED_PREDICTION_TIME_MIN_SECONDS = 1.5
 UNIFIED_PREDICTION_TIME_MAX_SECONDS = 2.5
-MAX_PICKUPS_ON_SCREEN = 4 # Max total pickups of all kinds
+MAX_PICKUPS_ON_SCREEN = 6 # Max total pickups of all kinds
 
 # Weights for choosing pickups. Heart gets higher priority if an orb is low HP during safety period.
 PICKUP_KINDS_WEIGHTS = {
     "heart": 8,    # Increased for frequent health
-    "saw": 10,     # Increased for frequent saws/blades
+    "saw": 20,     # Increased for frequent saws/blades
     "shield": 3,   # Less frequent than saw/heart
     "bomb": 0.5    # Remains rare
 }
@@ -76,9 +76,9 @@ def main():
     # The ARENA_WIDTH_FROM_CFG from cfg is effectively CANVAS_W now from generator.
     ARENA_WIDTH_FROM_CFG = cfg.get("arena_width", CANVAS_W) # Ensure this is used, should be CANVAS_W
     ARENA_HEIGHT_FROM_CFG = cfg.get("arena_height", ARENA_H) # Use global ARENA_H as fallback
-    ORB_RADIUS_CFG = cfg.get("orb_radius", 60)
+    ORB_RADIUS_CFG = cfg.get("orb_radius", 80)
     PICKUP_RADIUS_CFG = cfg.get("pickup_radius", 20) # Default if not in cfg
-    BORDER_THICKNESS_CFG = int(cfg.get("border_thickness", 6)) # Ensure integer for Pygame
+    BORDER_THICKNESS_CFG = int(cfg.get("border_thickness", 15)) # Ensure integer for Pygame
     BORDER_COLOR_CFG = tuple(cfg.get("border_color", [255, 0, 90]))
     BORDER_FLASH_COLOR_CFG = tuple(cfg.get("border_flash_color", [255, 255, 0]))
     DEFAULT_FLASH_DURATION_CFG = cfg.get("default_flash_duration", 1.0)
@@ -90,6 +90,10 @@ def main():
     # DURATION_CFG = cfg.get("duration", 70) # Example: add a duration field to YAML or calculate
     # For dynamic mode, let's set a longer or indefinite duration, or manage end conditions differently.
     DURATION_SECONDS = cfg.get("duration", 70) # Allow duration from YAML, default to 70s
+
+    # Define arena rect for particle collisions (inner dimensions of playable area)
+    # Assuming ARENA_WIDTH_FROM_CFG and ARENA_HEIGHT_FROM_CFG are these inner dimensions.
+    arena_rect_for_particles = pygame.Rect(0, 0, ARENA_WIDTH_FROM_CFG, ARENA_HEIGHT_FROM_CFG)
 
     pygame.init()
     pygame.font.init()
@@ -256,7 +260,7 @@ def main():
             orb.update(dt)
 
         camera.update(dt)
-        particle_emitter.update(dt)
+        particle_emitter.update(dt, arena_rect_for_particles)
 
         # Update active saws
         for s in phys.active_saws[:]:
