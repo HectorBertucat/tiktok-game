@@ -1,9 +1,91 @@
-    events:
-      - { t: 2,  type: spawn_pickup, kind: "heart", x: 0.5, y: 0.5 }
-      - { t: 3,  type: spawn_pickup, kind: "saw", x: 200, y: 300 }
-      - { t: 5,  type: text_overlay, text: "Slow Mo Incoming!", duration: 2, position: "top_center", font_size: 60 }
-      - { t: 7, type: slowmo, factor: 0.3, duration: 4 }
-      - { t: 10, type: spawn_pickup, kind: "shield" } # Spawns shield at random position
-      - { t: 12, type: text_overlay, text: "TEST!", duration: 3, position: [0.5, 0.2], color: [255,50,50] }
-      - { t: 15, type: spawn_pickup, kind: "bomb", x: 0.25, y: 0.75 }
-      - { t: 20, type: spawn_pickup, kind: "freeze", y: 0.5 } # Spawns freeze at random x, specific y
+title: Generated Battle Scenario
+orb_radius: 40.0
+pickup_radius: 20.0
+arena_width: 800
+arena_height: 800
+fps: 60
+orbs:
+  - name: Paris Saint-Germain
+    logo: assets/logos/psg.svg.webp
+    max_hp: 6
+    outline_color:
+      - 255
+      - 0
+      - 0
+    initial_position:
+      - 200.0
+      - 400.0
+    initial_velocity:
+      - 185.92
+      - 46.98
+  - name: Inter Milan
+    logo: assets/logos/inter.svg.png
+    max_hp: 6
+    outline_color:
+      - 0
+      - 0
+      - 255
+    initial_position:
+      - 600.0
+      - 400.0
+    initial_velocity:
+      - -173.61
+      - -25.54
+events:
+  - t: 2.23
+    type: spawn_pickup
+    kind: saw
+    x: 176.87022062733553
+    y: 177.66840419012405
+  - t: 9.67
+    type: slowmo
+    factor: 0.2
+    duration: 5.632706063004081
+  - t: 13.88
+    type: spawn_pickup
+    kind: heart
+    x: 192.08207135203278
+    y: 433.52251355538874
+  - t: 19.15
+    type: spawn_pickup
+    kind: shield
+  - t: 25.73
+    type: spawn_pickup
+    kind: shield
+  - t: 31.55
+    type: spawn_pickup
+    kind: saw
+    x: 58.838004516835475
+    y: 415.4398833574551
+  - t: 37.15
+    type: spawn_pickup
+    kind: saw
+    x: 586.6487865905925
+    y: 165.55254015670116
+  - t: 42.23
+    type: spawn_pickup
+    kind: heart
+    x: 147.74233242581283
+    y: 580.4925611851152
+  - t: 48.78
+    type: slowmo
+    factor: 0.2
+    duration: 5.883445019666838
+  - t: 52.92
+    type: spawn_pickup
+    kind: shield
+  - t: 59.7
+    type: spawn_pickup
+    kind: heart
+    x: 151.36639916507042
+    y: 574.8228303542182
+  - t: 63.87
+    type: spawn_pickup
+    kind: saw
+    x: 610.8335720285851
+    y: 470.9243965697323
+  - t: 67.93
+    type: spawn_pickup
+    kind: heart
+    x: 470.3980778921174
+    y: 473.1420485643358

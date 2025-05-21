@@ -2,13 +2,15 @@
 from dataclasses import dataclass, field
 import random, pygame, pymunk, math
 
+MAX_ORB_VELOCITY = 1500 # pixels/second, adjust as needed
+
 @dataclass
 class Orb:
     name: str
     logo_surface: pygame.Surface         # image ronde
     body: pymunk.Body                    # physique
     shape: pymunk.Circle
-    max_hp: int = 6
+    max_hp: int = 7
     hp: int = field(init=False)
     outline_color: tuple[int,int,int] = field(default=(255,255,255)) # Default to white
     heal_effect_active: bool = field(init=False, default=False)
@@ -17,21 +19,46 @@ class Orb:
     # Pickup related states
     is_shielded: bool = field(init=False, default=False) # Renamed from shielded for consistency
     has_saw: 'Saw | None' = field(init=False, default=None)
-    is_frozen: bool = field(init=False, default=False)
-    original_body_type: int | None = field(init=False, default=None)
 
     def __post_init__(self):
         self.hp = self.max_hp
+
+    def update(self, dt):
+        # Heal effect timer
+        if self.heal_effect_active:
+            self.heal_effect_timer -= 1
+            if self.heal_effect_timer <= 0:
+                self.heal_effect_active = False
+
+        # Velocity capping
+        if self.body: # Ensure body exists
+            velocity = self.body.velocity
+            speed = velocity.length
+            if speed > MAX_ORB_VELOCITY:
+                self.body.velocity = velocity.normalized() * MAX_ORB_VELOCITY
+                # print(f"DEBUG: Orb {self.name} velocity capped from {speed:.0f} to {MAX_ORB_VELOCITY}")
 
     def draw(self, screen, offset=(0, 0)):
         x = self.body.position.x + offset[0]
         y = self.body.position.y + offset[1]
 
-        # Draw outline first
+        # Draw shield effect first if active, so it's behind the orb
+        if self.is_shielded:
+            shield_color_outline = (0, 0, 255)  # Blue outline
+            shield_color_fill = (100, 100, 255, 77) # Lighter blue fill, 77/255 opacity (~30%)
+            # Make shield visually larger
+            shield_radius = int(self.shape.radius + 12) # Increased from +6 to +12
+
+            # Create a temporary surface for alpha blending the shield fill
+            shield_surface = pygame.Surface((shield_radius * 2, shield_radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(shield_surface, shield_color_fill, (shield_radius, shield_radius), shield_radius)
+            screen.blit(shield_surface, (int(x - shield_radius), int(y - shield_radius)))
+            
+        # Draw outline next
         outline_radius = self.shape.radius + 3 # Slightly larger for outline
         pygame.draw.circle(screen, self.outline_color, (int(x), int(y)), int(outline_radius), width=3)
 
-        # Draw logo on top
+        # Draw logo on top of everything
         rect = self.logo_surface.get_rect(center=(x, y))
         screen.blit(self.logo_surface, rect)
 
@@ -75,23 +102,29 @@ class Orb:
 class Pickup:
     """
     Objet au sol qu'un orb peut ramasser.
-    kind: 'saw', 'heart', 'shield', 'bomb', 'freeze'
+    kind: 'saw', 'heart', 'shield', 'bomb'
     """
-    def __init__(self, kind, img_surface, pos, space):
+
+    def __init__(self, kind, img_surface, pos, space, radius=20):
         self.kind = kind
-        self.sprite = pygame.transform.smoothscale(img_surface, (40, 40))
+        sprite_diameter = int(radius * 2)
+        self.sprite = pygame.transform.smoothscale(img_surface, (sprite_diameter, sprite_diameter))
+        
         body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
         body.position = pos
-        shape = pymunk.Circle(body, 20)
+        shape = pymunk.Circle(body, radius)
         shape.collision_type = 3 # Collision type for pickups
         shape.pickup_ref = self
         space.add(body, shape)
         self.body, self.shape = body, shape
         self.alive = True
+        
+        self.is_active = True
 
     def draw(self, screen, offset=(0, 0)):
         if not self.alive:
             return
+        
         x, y = self.body.position
         rect = self.sprite.get_rect(center=(x + offset[0], y + offset[1]))
         screen.blit(self.sprite, rect)
@@ -111,12 +144,17 @@ class Saw:
     Scie attachée (centrée) sur son owner. Rayon > orb → dépasse visuellement.
     """
     def __init__(self, img_surface, owner_orb, space,
-                 scale_px=150, omega_deg=720):
+                 omega_deg=720):
         self.owner: Orb = owner_orb # Type hint for clarity
         self.angle = 0
         self.omega = omega_deg
         self.alive = True
         self.space = space # Store space reference for destroy method
+
+        # Dynamically scale saw based on owner orb's radius
+        # Example: Saw diameter is 2.5 times the orb's radius
+        orb_radius = self.owner.shape.radius 
+        scale_px = int(orb_radius * 2.5) 
 
         self.sprite_orig = pygame.transform.smoothscale(img_surface,
                                                         (scale_px, scale_px))
@@ -141,11 +179,14 @@ class Saw:
 
         self.angle += self.omega * dt
         self.body.position = self.owner.body.position
+        self.body.velocity = self.owner.body.velocity # Match owner's velocity for better kinematic collisions
         self.sprite = pygame.transform.rotate(self.sprite_orig, -self.angle)
 
     def draw(self, screen, offset=(0, 0)):
         if not self.alive or not self.owner or self.owner.hp <= 0:
             return
+        
+        # Current sprite drawing
         x, y = self.body.position
         rect = self.sprite.get_rect(center=(x + offset[0], y + offset[1]))
         screen.blit(self.sprite, rect)
