@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 import random, pygame, pymunk, math
 
 MAX_ORB_VELOCITY = 1500 # pixels/second, adjust as needed
+HP_ANIMATION_DURATION = 0.3 # seconds for the HP change animation
 
 @dataclass
 class Orb:
@@ -13,30 +14,45 @@ class Orb:
     max_hp: int = 7
     hp: int = field(init=False)
     outline_color: tuple[int,int,int] = field(default=(255,255,255)) # Default to white
-    heal_effect_active: bool = field(init=False, default=False)
-    heal_effect_timer: int = field(init=False, default=0)
+    # heal_effect_active: bool = field(init=False, default=False) # old simple heal flash
+    # heal_effect_timer: int = field(init=False, default=0) # old simple heal flash
     
     # Pickup related states
-    is_shielded: bool = field(init=False, default=False) # Renamed from shielded for consistency
+    is_shielded: bool = field(init=False, default=False)
     has_saw: 'Saw | None' = field(init=False, default=None)
+
+    # HP Animation State
+    previous_hp: int = field(init=False) # HP at the start of the previous frame
+    hp_animation_timer: float = field(init=False, default=0.0)
+    hp_at_animation_start: int = field(init=False, default=0)
+    hp_target_for_animation: int = field(init=False, default=0)
+    # is_gaining_hp_animation: bool = field(init=False, default=False) # Can be inferred from hp_target vs hp_at_start
 
     def __post_init__(self):
         self.hp = self.max_hp
+        self.previous_hp = self.max_hp # Initialize previous_hp
+        self.hp_at_animation_start = self.max_hp
+        self.hp_target_for_animation = self.max_hp
 
     def update(self, dt):
-        # Heal effect timer
-        if self.heal_effect_active:
-            self.heal_effect_timer -= 1
-            if self.heal_effect_timer <= 0:
-                self.heal_effect_active = False
+        # Update HP animation timer
+        if self.hp_animation_timer > 0:
+            self.hp_animation_timer -= dt
+            if self.hp_animation_timer < 0:
+                self.hp_animation_timer = 0
+                # Animation finished, ensure current hp is the target (should already be)
+                # self.hp = self.hp_target_for_animation # This should be done by take_hit/heal
 
         # Velocity capping
-        if self.body: # Ensure body exists
+        if self.body: 
             velocity = self.body.velocity
             speed = velocity.length
             if speed > MAX_ORB_VELOCITY:
                 self.body.velocity = velocity.normalized() * MAX_ORB_VELOCITY
-                # print(f"DEBUG: Orb {self.name} velocity capped from {speed:.0f} to {MAX_ORB_VELOCITY}")
+        
+        # Update previous_hp at the end of the update, before next frame's input processing
+        # This is crucial for renderer to correctly diff current vs previous visual state
+        # self.previous_hp = self.hp # This should be set in the main loop AFTER rendering for correct diff
 
     def draw(self, screen, offset=(0, 0)):
         x = self.body.position.x + offset[0]
@@ -69,15 +85,40 @@ class Orb:
         if self.is_shielded:
             self.is_shielded = False
             print(f"{self.name} shield blocked a hit!")
-            # Potentially add a sound effect for shield break here via battle_context
+            # Here, you could also trigger a specific "shield block" animation if desired
+            # For now, no HP change means no HP animation
             return
 
-        self.hp = max(0, self.hp - dmg)
+        if self.hp <= 0: # Already dead, no further damage or animation
+            return
 
-    def heal(self, amount=2):
-        self.hp = min(self.max_hp, self.hp + amount)
-        self.heal_effect_active = True
-        self.heal_effect_timer = 10 # Number of frames for the effect
+        old_hp_for_animation = self.hp
+        new_hp = max(0, self.hp - dmg)
+        
+        if new_hp != old_hp_for_animation: # Only animate if HP actually changed
+            self.hp = new_hp # Update actual HP
+            self.hp_at_animation_start = old_hp_for_animation
+            self.hp_target_for_animation = new_hp
+            self.hp_animation_timer = HP_ANIMATION_DURATION
+            # self.is_gaining_hp_animation = False # Redundant, target < start implies loss
+            print(f"DEBUG: {self.name} took hit. HP: {old_hp_for_animation} -> {new_hp}. Anim timer: {self.hp_animation_timer}")
+
+    def heal(self, amount=1): # Default heal amount to 1 as per recent changes
+        if self.hp >= self.max_hp: # Already full, no heal or animation
+            return
+
+        old_hp_for_animation = self.hp
+        new_hp = min(self.max_hp, self.hp + amount)
+
+        if new_hp != old_hp_for_animation: # Only animate if HP actually changed
+            self.hp = new_hp # Update actual HP
+            self.hp_at_animation_start = old_hp_for_animation
+            self.hp_target_for_animation = new_hp
+            self.hp_animation_timer = HP_ANIMATION_DURATION
+            # self.is_gaining_hp_animation = True # Redundant, target > start implies gain
+            print(f"DEBUG: {self.name} healed. HP: {old_hp_for_animation} -> {new_hp}. Anim timer: {self.hp_animation_timer}")
+        # The old heal_effect_active and heal_effect_timer are removed
+        # The new HP bar animation will serve as the visual feedback.
 
     def attach_shape(self, space, radius):
         """Crée le body + shape et lie la shape à self (pour collisions)."""

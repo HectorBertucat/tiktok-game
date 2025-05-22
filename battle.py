@@ -443,29 +443,6 @@ def main():
         for i, orb in enumerate(battle_context.orbs):
             # The 'y' parameter is no longer needed as it's calculated internally by draw_top_hp_bar
             draw_top_hp_bar(screen, orb, index=i, total_orbs=len(battle_context.orbs))
-            if orb.heal_effect_active:
-                flash_color = (0, 255, 0)
-                original_bar_w, original_bar_h = 360, 14
-                scaled_bar_w, scaled_bar_h = int(original_bar_w * 1.1), int(original_bar_h * 1.1)
-
-                bar_w, bar_h = 360, 14
-                seg_w = screen.get_width() // 2
-                original_x = i * seg_w + (seg_w - bar_w) // 2
-                original_y = SAFE_TOP // 2
-
-                scaled_x = original_x - (scaled_bar_w - original_bar_w) // 2
-                scaled_y = original_y - (scaled_bar_h - original_bar_h) // 2
-
-                pct = orb.hp / orb.max_hp
-                bg_rect = pygame.Rect(scaled_x, scaled_y, scaled_bar_w, scaled_bar_h)
-                fg_rect = pygame.Rect(scaled_x, scaled_y, int(scaled_bar_w * pct), scaled_bar_h)
-
-                pygame.draw.rect(screen, (60,60,60), bg_rect, border_radius=5)
-                pygame.draw.rect(screen, flash_color, fg_rect, border_radius=5)
-
-                orb.heal_effect_timer -= 1
-                if orb.heal_effect_timer <= 0:
-                    orb.heal_effect_active = False
 
         # Arena rendering offsets
         # ARENA_X0 is now 0, so render_offset_x is just camera.offset.x

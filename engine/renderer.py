@@ -1,5 +1,6 @@
 # engine/renderer.py
 import pygame, numpy as np, random
+from engine.game_objects import HP_ANIMATION_DURATION # Import the constant
 
 # Health bar colors
 COLOR_HP_HIGH = (8, 188, 19)  # Green #08BC13 (HP 6-7)
@@ -18,6 +19,7 @@ HP_SEGMENT_GAP = 4              # Gap between segments
 HP_SEGMENT_BORDER_RADIUS = 7    # Rounded corners for segments
 HP_NAME_FONT_SIZE = 52          # Much larger font for orb names
 HP_NAME_BOTTOM_MARGIN = 8       # Space between name and its HP bar
+HP_SEGMENT_SHAKE_INTENSITY = 4  # Max pixels for HP segment shake
 
 # renderer.py  — nouvelle fonction
 def draw_top_hp_bar(screen, orb, index, total_orbs=2):
@@ -69,31 +71,122 @@ def draw_top_hp_bar(screen, orb, index, total_orbs=2):
     if segment_width <= 2: # Fallback for very narrow screens / too many segments
         bar_rect = pygame.Rect(bar_segments_start_x, hp_bar_y_position, segments_total_available_width, HP_BAR_HEIGHT_PER_ORB)
         pygame.draw.rect(screen, COLOR_HP_BORDER, bar_rect, border_radius=HP_SEGMENT_BORDER_RADIUS)
-        filled_width_ratio = orb.hp / num_segments if num_segments > 0 else 0
+        
+        # Simplified animation for fallback bar (just color change, no wipe/shake)
+        current_display_hp = orb.hp
+        if orb.hp_animation_timer > 0:
+            # For fallback, just show the target HP color during animation
+            # Or one could lerp the width if feeling fancy, but simple is fine for fallback
+            pass # Color is already determined by orb.hp (target)
+
+        filled_width_ratio = current_display_hp / num_segments if num_segments > 0 else 0
         filled_width = filled_width_ratio * segments_total_available_width
         if filled_width > 0:
             filled_rect = pygame.Rect(bar_segments_start_x + 1, hp_bar_y_position + 1, filled_width - 2 , HP_BAR_HEIGHT_PER_ORB - 2)
-            pygame.draw.rect(screen, current_hp_color, filled_rect, border_radius=max(0, HP_SEGMENT_BORDER_RADIUS -1))
+            # Determine color for fallback based on actual current orb.hp
+            final_color_for_fallback = COLOR_HP_EMPTY
+            if orb.hp >= 6: final_color_for_fallback = COLOR_HP_HIGH
+            elif orb.hp >= 3: final_color_for_fallback = COLOR_HP_MID
+            else: final_color_for_fallback = COLOR_HP_LOW # Covers 1 & 2, and 0 if it somehow happens
+            if orb.hp == 0 : final_color_for_fallback = COLOR_HP_EMPTY # Explicitly empty if 0
+            pygame.draw.rect(screen, final_color_for_fallback, filled_rect, border_radius=max(0, HP_SEGMENT_BORDER_RADIUS -1))
         return
 
+    # Animation calculations
+    anim_progress = 0.0
+    is_animating = orb.hp_animation_timer > 0
+    if is_animating:
+        anim_progress = 1.0 - (orb.hp_animation_timer / HP_ANIMATION_DURATION) # Use imported constant
+        anim_progress = max(0, min(1, anim_progress)) # Clamp progress
+
+    hp_lost_start_segment_idx = orb.hp_target_for_animation # For loss, this is the first newly empty segment
+    hp_gained_end_segment_idx = orb.hp_target_for_animation -1 # For gain, this is the last newly filled segment
+
     for i in range(num_segments):
-        segment_x = bar_segments_start_x + i * (segment_width + HP_SEGMENT_GAP)
-        segment_rect = pygame.Rect(segment_x, hp_bar_y_position, segment_width, HP_BAR_HEIGHT_PER_ORB)
+        segment_x_base = bar_segments_start_x + i * (segment_width + HP_SEGMENT_GAP)
+        segment_y_base = hp_bar_y_position
+        
+        current_segment_shake_x = 0
+        current_segment_shake_y = 0
+
+        # Determine if this segment is part of the animated change
+        segment_is_part_of_animation = False
+        is_loss_animation = orb.hp_target_for_animation < orb.hp_at_animation_start
+        is_gain_animation = orb.hp_target_for_animation > orb.hp_at_animation_start
+
+        if is_animating:
+            if is_loss_animation and i >= orb.hp_target_for_animation and i < orb.hp_at_animation_start:
+                segment_is_part_of_animation = True # This segment is being lost
+            elif is_gain_animation and i < orb.hp_target_for_animation and i >= orb.hp_at_animation_start:
+                segment_is_part_of_animation = True # This segment is being gained
+        
+        if segment_is_part_of_animation:
+            # Apply shake: simple random offset, could be a sine wave for smoothness
+            shake_intensity = HP_SEGMENT_SHAKE_INTENSITY * (1 - anim_progress) # Shake more at start
+            current_segment_shake_x = random.uniform(-shake_intensity, shake_intensity)
+            current_segment_shake_y = random.uniform(-shake_intensity, shake_intensity)
+
+        segment_rect = pygame.Rect(segment_x_base + current_segment_shake_x,
+                                  segment_y_base + current_segment_shake_y, 
+                                  segment_width, HP_BAR_HEIGHT_PER_ORB)
         
         pygame.draw.rect(screen, COLOR_HP_BORDER, segment_rect, border_radius=HP_SEGMENT_BORDER_RADIUS)
         
-        inner_fill_rect = pygame.Rect(segment_rect.left + 1, segment_rect.top + 1, segment_rect.width - 2, segment_rect.height - 2)
+        inner_fill_rect_base = pygame.Rect(segment_rect.left + 1, segment_rect.top + 1, 
+                                          segment_rect.width - 2, segment_rect.height - 2)
         inner_border_radius = max(0, HP_SEGMENT_BORDER_RADIUS - 1)
 
-        if i < orb.hp:
-            pygame.draw.rect(screen, current_hp_color, inner_fill_rect, border_radius=inner_border_radius)
-            highlight_rect_height = max(1, inner_fill_rect.height // 3) # Ensure at least 1px for highlight
-            highlight_rect = pygame.Rect(inner_fill_rect.left, inner_fill_rect.top, inner_fill_rect.width, highlight_rect_height)
-            # Ensure highlight radius does not exceed fill radius
-            highlight_top_radius = inner_border_radius 
-            pygame.draw.rect(screen, highlight_hp_color, highlight_rect, border_top_left_radius=highlight_top_radius, border_top_right_radius=highlight_top_radius)
+        # Determine visual state of the segment (filled, empty, or animating)
+        is_currently_filled_visual = i < orb.hp_target_for_animation # What it will be post-animation
+        was_previously_filled_visual = i < orb.hp_at_animation_start # What it was pre-animation
+
+        final_segment_color = COLOR_HP_EMPTY
+        final_highlight_color = None # No highlight for empty or partially filled animating segments initially
+        apply_highlight = False
+        segment_width_for_wipe = inner_fill_rect_base.width
+
+        if segment_is_part_of_animation:
+            if is_loss_animation: # Segment is being lost (animates from full to empty)
+                wipe_progress = anim_progress # For loss, wipe goes R to L, so width reduces with progress
+                current_fill_width = inner_fill_rect_base.width * (1 - wipe_progress)
+                final_segment_color = current_hp_color # Color of the HP being lost
+                segment_width_for_wipe = current_fill_width
+                # Highlight only if substantially filled
+                apply_highlight = current_fill_width > inner_fill_rect_base.width * 0.3 
+            elif is_gain_animation: # Segment is being gained (animates from empty to full)
+                wipe_progress = anim_progress # For gain, wipe goes L to R, so width increases with progress
+                current_fill_width = inner_fill_rect_base.width * wipe_progress
+                final_segment_color = current_hp_color # Color of the HP being gained
+                segment_width_for_wipe = current_fill_width
+                apply_highlight = current_fill_width > inner_fill_rect_base.width * 0.3
+            if apply_highlight: final_highlight_color = highlight_hp_color
         else:
-            pygame.draw.rect(screen, COLOR_HP_EMPTY, inner_fill_rect, border_radius=inner_border_radius)
+            # Not animating, just draw based on target HP state
+            if i < orb.hp_target_for_animation: # Stays filled or is already filled
+                final_segment_color = current_hp_color
+                final_highlight_color = highlight_hp_color
+                apply_highlight = True
+            else: # Stays empty or is already empty
+                final_segment_color = COLOR_HP_EMPTY
+                apply_highlight = False
+        
+        # Draw the segment fill (potentially wiped)
+        if segment_width_for_wipe > 0:
+            animated_segment_fill_rect = pygame.Rect(inner_fill_rect_base.left, inner_fill_rect_base.top, 
+                                                     segment_width_for_wipe, inner_fill_rect_base.height)
+            pygame.draw.rect(screen, final_segment_color, animated_segment_fill_rect, border_radius=inner_border_radius)
+
+            if apply_highlight and final_highlight_color and segment_width_for_wipe > 0:
+                highlight_rect_height = max(1, animated_segment_fill_rect.height // 3)
+                actual_highlight_rect = pygame.Rect(animated_segment_fill_rect.left, 
+                                                    animated_segment_fill_rect.top, 
+                                                    animated_segment_fill_rect.width, 
+                                                    highlight_rect_height)
+                pygame.draw.rect(screen, final_highlight_color, actual_highlight_rect, 
+                                 border_top_left_radius=inner_border_radius, 
+                                 border_top_right_radius=inner_border_radius)
+        elif final_segment_color == COLOR_HP_EMPTY and not segment_is_part_of_animation : # Explicitly draw empty if it should be empty and not animating
+             pygame.draw.rect(screen, COLOR_HP_EMPTY, inner_fill_rect_base, border_radius=inner_border_radius)
 
 def surface_to_array(surf):
     '''Pygame Surface -> RGB numpy array (H, W, 3)'''
