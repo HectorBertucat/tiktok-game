@@ -1,6 +1,6 @@
 # battle.py – tout en haut
 import pygame, random, math
-from moviepy import ImageSequenceClip
+from moviepy import VideoFileClip
 from pathlib import Path
 from ruamel.yaml import YAML
 import numpy as np
@@ -63,6 +63,113 @@ PRED_MAX_ORB_VELOCITY = 1500 # Must match MAX_ORB_VELOCITY in engine.game_object
 def load_cfg(path):
     yaml = YAML(typ="safe")
     return yaml.load(path.read_text())
+
+class VideoBackground:
+    def __init__(self, video_path, canvas_width, canvas_height):
+        """Load video and prepare for looping background"""
+        self.canvas_width = canvas_width
+        self.canvas_height = canvas_height
+        self.video_path = video_path
+        self.video_clip = None
+        self.frames = []
+        self.current_frame_idx = 0
+        self.fps = 30  # Default fps for video playback
+        self.frame_time = 0
+        self.time_per_frame = 1.0 / self.fps
+        
+        try:
+            # Load video clip
+            self.video_clip = VideoFileClip(str(video_path))
+            self.fps = self.video_clip.fps
+            self.time_per_frame = 1.0 / self.fps
+            
+            # Pre-process all frames for efficient playback
+            self._preprocess_frames()
+            
+        except Exception as e:
+            print(f"Error loading video background: {e}")
+            self.frames = []
+    
+    def _preprocess_frames(self):
+        """Convert video frames to rotated/scaled pygame surfaces"""
+        if not self.video_clip:
+            return
+            
+        try:
+            # Extract all frames as numpy arrays
+            frame_arrays = []
+            for t in np.arange(0, self.video_clip.duration, self.time_per_frame):
+                frame = self.video_clip.get_frame(t)
+                frame_arrays.append(frame)
+            
+            # Process each frame
+            for frame_array in frame_arrays:
+                # Convert to pygame surface
+                frame_surface = pygame.surfarray.make_surface(frame_array.swapaxes(0, 1))
+                
+                # Rotate 90 degrees clockwise (landscape to portrait)
+                rotated_surface = pygame.transform.rotate(frame_surface, -90)
+                
+                # Scale to fill canvas while maintaining aspect ratio
+                scaled_surface = self._scale_to_fill(rotated_surface)
+                
+                self.frames.append(scaled_surface)
+                
+        except Exception as e:
+            print(f"Error preprocessing video frames: {e}")
+            self.frames = []
+        finally:
+            # Clean up video clip to free memory
+            if self.video_clip:
+                self.video_clip.close()
+                self.video_clip = None
+    
+    def _scale_to_fill(self, surface):
+        """Scale surface to fill canvas completely without stretching"""
+        surface_width = surface.get_width()
+        surface_height = surface.get_height()
+        
+        # Calculate scale factors for both dimensions
+        scale_x = self.canvas_width / surface_width
+        scale_y = self.canvas_height / surface_height
+        
+        # Use the larger scale factor to ensure full coverage
+        scale = max(scale_x, scale_y)
+        
+        # Calculate new dimensions
+        new_width = int(surface_width * scale)
+        new_height = int(surface_height * scale)
+        
+        # Scale the surface
+        scaled_surface = pygame.transform.scale(surface, (new_width, new_height))
+        
+        # If scaled surface is larger than canvas, we'll center it when drawing
+        return scaled_surface
+    
+    def update(self, dt):
+        """Update frame timing for animation"""
+        if not self.frames:
+            return
+            
+        self.frame_time += dt
+        if self.frame_time >= self.time_per_frame:
+            self.frame_time = 0
+            self.current_frame_idx = (self.current_frame_idx + 1) % len(self.frames)
+    
+    def draw(self, screen):
+        """Draw current frame to screen"""
+        if not self.frames:
+            # Fallback to solid color if no video loaded
+            screen.fill((20, 20, 20))
+            return
+            
+        current_frame = self.frames[self.current_frame_idx]
+        
+        # Center the frame on the canvas
+        frame_rect = current_frame.get_rect()
+        frame_rect.center = (self.canvas_width // 2, self.canvas_height // 2)
+        
+        screen.blit(current_frame, frame_rect)
 
 def main():
     cfg = load_cfg(CFG)
@@ -144,6 +251,10 @@ def main():
 
     screen = pygame.display.set_mode((CANVAS_W, CANVAS_H))
     clock  = pygame.time.Clock()
+    
+    # Initialize video background
+    video_bg = VideoBackground("assets/backgrounds/abstract_loop_fade.mp4", CANVAS_W, CANVAS_H)
+    
     saw_token_img = pygame.image.load("assets/pickups/saw_token.png").convert_alpha()
     heart_token_img = pygame.image.load("assets/pickups/heart_token.png").convert_alpha()
     blade_img     = pygame.image.load("assets/pickups/blade.png").convert_alpha()
@@ -245,6 +356,10 @@ def main():
         
         # dt_logic = (1 / GAME_FPS) # Simplified dt_logic as game_speed_factor is gone
         # The physics step dt is calculated directly later, no need for dt_logic here if only for that.
+        
+        # Update video background
+        dt = 1.0 / GAME_FPS
+        video_bg.update(dt)
 
         # --- Update physics and game objects ---
         # dt = 1.0 / GAME_FPS * game_state["game_speed_factor"] # Old dt with game_speed_factor
@@ -437,7 +552,8 @@ def main():
                 game_state["border_flash_until_time"] = 0 
         # else: color remains original color (or whatever it was last set to)
 
-        screen.fill((20, 20, 20))
+        # Draw video background
+        video_bg.draw(screen)
 
         # Draw HP bars at the top
         for i, orb in enumerate(battle_context.orbs):
