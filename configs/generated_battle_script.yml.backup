@@ -1,0 +1,43 @@
+title: Generated Battle Scenario
+orb_radius: 120.0
+pickup_radius: 30.0
+arena_width: 1080
+arena_height: 1300
+fps: 60
+border_thickness: 40.0
+border_color:
+  - 50
+  - 175
+  - 255
+border_flash_color:
+  - 255
+  - 255
+  - 0
+default_flash_duration: 1.0
+orbs:
+  - name: Paris Saint-Germain
+    logo: assets/logos/psg.svg.webp
+    max_hp: 6
+    outline_color:
+      - 255
+      - 0
+      - 0
+    initial_position:
+      - 270.0
+      - 500.0
+    initial_velocity:
+      - 533.05
+      - 138.06
+  - name: Inter Milan
+    logo: assets/logos/inter.svg.png
+    max_hp: 6
+    outline_color:
+      - 0
+      - 0
+      - 255
+    initial_position:
+      - 810.0
+      - 500.0
+    initial_velocity:
+      - -459.43
+      - -11.08

@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 import random, pygame, pymunk, math, time
 
-MAX_ORB_VELOCITY = 2500 # pixels/second, massively increased for faster action (from 1500)
+MAX_ORB_VELOCITY = 1500 # pixels/second, massively increased for faster action (from 1500)
 HP_ANIMATION_DURATION = 0.3 # seconds for the HP change animation
 
 @dataclass
@@ -94,7 +94,6 @@ class Orb:
                 screen.blit(shield_surface, (int(x - shield_radius), int(y - shield_radius)))
             
             # Shield border with pulsing effect
-            import time
             pulse = abs(math.sin(time.time() * 4)) * 0.3 + 0.7  # Pulse between 0.7 and 1.0
             shield_border_color = (int(0 * pulse), int(255 * pulse), int(255 * pulse))
             pygame.draw.circle(screen, shield_border_color, (int(x), int(y)), shield_base_radius, width=4)
@@ -231,7 +230,6 @@ class Pickup:
         center_x, center_y = x + offset[0], y + offset[1]
         
         # Enhanced neon glow effects for pickups based on type
-        import time
         pulse = abs(math.sin(time.time() * 3)) * 0.4 + 0.6  # Pulse between 0.6 and 1.0
         
         # Define glow colors based on pickup type
@@ -328,7 +326,6 @@ class Saw:
         center_x, center_y = x + offset[0], y + offset[1]
         
         # Enhanced neon glow effect for spinning saw
-        import time
         spin_glow = abs(math.sin(self.angle * 0.1)) * 0.3 + 0.7  # Spin-based glow
         
         # Saw glow colors (dangerous orange-red)

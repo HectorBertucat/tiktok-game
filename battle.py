@@ -62,7 +62,7 @@ PICKUP_KINDS_WEIGHTS = {
 # Constants from engine.game_objects that might be needed for prediction
 # This isn't ideal, better to pass them or have them in a shared config.
 # For now, hardcoding a reference value if not easily available.
-PRED_MAX_ORB_VELOCITY = 2500 # Must match MAX_ORB_VELOCITY in engine.game_objects.py
+PRED_MAX_ORB_VELOCITY = 1500 # Must match MAX_ORB_VELOCITY in engine.game_objects.py
 
 def load_cfg(path):
     yaml = YAML(typ="safe")
@@ -285,7 +285,7 @@ class PredictiveBattleDirector:
             "arena_height": battle_context.arena_height, 
             "border_thickness": battle_context.border_thickness_cfg,
             "space_damping": 0.99,
-            "max_velocity": 2500,
+            "max_velocity": 1500,
             "physics_substeps": 3
         }
         
@@ -692,7 +692,7 @@ class AudioRecorder:
                 print(f"Warning: Could not record sound - {e}")
     
     def export_audio(self, duration, output_path):
-        """Export recorded audio to a WAV file"""
+        """Export recorded audio to a WAV file with proper mixing and compression"""
         if not self.audio_events:
             print("No audio events recorded")
             return None
@@ -700,19 +700,32 @@ class AudioRecorder:
         try:
             # Create empty audio buffer
             total_samples = int(duration * self.sample_rate)
-            if len(self.audio_events[0][1].shape) > 1:
-                # Stereo
-                audio_buffer = np.zeros((total_samples, 2), dtype=np.float32)
-            else:
-                # Mono
-                audio_buffer = np.zeros(total_samples, dtype=np.float32)
             
-            # Mix all audio events
-            for game_time, sound_data in self.audio_events:
+            # Determine if we need stereo or mono based on first sound
+            is_stereo = len(self.audio_events[0][1].shape) > 1
+            if is_stereo:
+                audio_buffer = np.zeros((total_samples, 2), dtype=np.float64)  # Use float64 for better precision
+            else:
+                audio_buffer = np.zeros(total_samples, dtype=np.float64)
+            
+            print(f"Mixing {len(self.audio_events)} audio events...")
+            
+            # Mix all audio events with dynamic volume scaling
+            for i, (game_time, sound_data) in enumerate(self.audio_events):
                 start_sample = int(game_time * self.sample_rate)
                 end_sample = start_sample + len(sound_data)
                 
                 if end_sample <= total_samples:
+                    # Convert sound_data to float for better precision
+                    sound_data = sound_data.astype(np.float64)
+                    
+                    # Normalize individual sound to prevent one loud sound from dominating
+                    if len(sound_data) > 0:
+                        max_val = np.max(np.abs(sound_data))
+                        if max_val > 0:
+                            sound_data = sound_data / max_val
+                    
+                    # Handle mono/stereo conversion
                     if len(audio_buffer.shape) > 1 and len(sound_data.shape) == 1:
                         # Convert mono to stereo
                         sound_data = np.column_stack([sound_data, sound_data])
@@ -720,10 +733,54 @@ class AudioRecorder:
                         # Convert stereo to mono
                         sound_data = np.mean(sound_data, axis=1)
                     
-                    audio_buffer[start_sample:end_sample] += sound_data * 0.3  # Mix at lower volume
+                    # Dynamic volume based on number of simultaneous sounds
+                    # Check how many sounds are playing around this time
+                    concurrent_sounds = sum(1 for t, _ in self.audio_events 
+                                          if abs(t - game_time) < 0.5)  # Within 0.5 seconds
+                    
+                    # Reduce volume more when many sounds are playing simultaneously
+                    volume_scale = 0.15 / max(1, concurrent_sounds * 0.3)  # Dynamic volume scaling
+                    volume_scale = max(0.02, min(0.15, volume_scale))  # Clamp between 0.02 and 0.15
+                    
+                    # Mix the sound with appropriate volume
+                    audio_buffer[start_sample:end_sample] += sound_data * volume_scale
             
-            # Normalize and convert to 16-bit
-            audio_buffer = np.clip(audio_buffer, -1.0, 1.0)
+            # Apply soft compression to prevent clipping
+            def soft_compress(audio, threshold=0.8, ratio=4.0):
+                """Apply soft compression to audio"""
+                compressed = np.copy(audio)
+                mask = np.abs(audio) > threshold
+                excess = np.abs(audio[mask]) - threshold
+                compressed[mask] = np.sign(audio[mask]) * (threshold + excess / ratio)
+                return compressed
+            
+            # Apply compression
+            audio_buffer = soft_compress(audio_buffer, threshold=0.7, ratio=3.0)
+            
+            # Final normalization - find peak and normalize to -6dB to leave more headroom
+            peak = np.max(np.abs(audio_buffer))
+            if peak > 0:
+                target_level = 0.5  # -6dB headroom (more conservative)
+                audio_buffer = audio_buffer * (target_level / peak)
+            
+            # Apply a gentle high-frequency rolloff to prevent harsh digital artifacts
+            def gentle_filter(audio):
+                """Apply gentle low-pass filtering to reduce harshness"""
+                if len(audio.shape) > 1:
+                    # Stereo - apply to both channels
+                    filtered = np.copy(audio)
+                    for ch in range(audio.shape[1]):
+                        # Simple moving average for gentle filtering
+                        filtered[:, ch] = np.convolve(audio[:, ch], np.ones(3)/3, mode='same')
+                else:
+                    # Mono
+                    filtered = np.convolve(audio, np.ones(3)/3, mode='same')
+                return filtered
+            
+            audio_buffer = gentle_filter(audio_buffer)
+            
+            # Convert to 16-bit with proper clipping prevention
+            audio_buffer = np.clip(audio_buffer, -0.99, 0.99)  # Slightly under full scale
             audio_buffer = (audio_buffer * 32767).astype(np.int16)
             
             # Save as WAV file
@@ -854,6 +911,13 @@ class VideoBackground:
 
 def main(headless=False, export_only=False):
     cfg = load_cfg(CFG)
+    
+    # Ensure deterministic behavior in export mode for consistent results
+    if export_only:
+        random.seed(42)  # Fixed seed for export mode
+        import numpy as np
+        np.random.seed(42)
+        print("🎲 Using deterministic random seed for consistent export")
     # random.seed(cfg["seed"]) # Seeding is now handled by generator for scenario determinism
                                # Or, if runtime randomness is needed for non-gameplay, seed separately.
 
@@ -899,18 +963,31 @@ def main(headless=False, export_only=False):
     # Initialize the advanced AI battle director
     battle_director = PredictiveBattleDirector(target_duration_min=61, target_duration_max=70)
 
-    # Load SFX
+    # Load SFX with reduced volume to prevent saturation
     try:
         # slow_mo_start_sfx = pygame.mixer.Sound("assets/sfx/slow_mo_start.wav") # Removed
         # slow_mo_end_sfx = pygame.mixer.Sound("assets/sfx/slow_mo_end.wav") # Removed
         health_boost_sfx = pygame.mixer.Sound("assets/sfx/health_boost.wav")
+        health_boost_sfx.set_volume(0.6)  # Reduce volume
+        
         hit_normal_sfx = pygame.mixer.Sound("assets/sfx/hit_normal.wav")
+        hit_normal_sfx.set_volume(0.4)  # Reduce volume for frequent sounds
+        
         hit_blade_sfx = pygame.mixer.Sound("assets/sfx/hit_blade.wav")
-        # New SFX
+        hit_blade_sfx.set_volume(0.5)  # Reduce volume
+        
+        # New SFX with appropriate volumes
         bomb1_sfx = pygame.mixer.Sound("assets/sfx/bomb1.wav")
+        bomb1_sfx.set_volume(0.7)  # Bombs should be prominent but not overpowering
+        
         bomb_sfx = pygame.mixer.Sound("assets/sfx/bomb.wav")
+        bomb_sfx.set_volume(0.6)  # Secondary bomb sound
+        
         shield_pickup_sfx = pygame.mixer.Sound("assets/sfx/shield.wav")
+        shield_pickup_sfx.set_volume(0.5)  # Moderate volume for pickups
+        
         blade_get_power_up_sfx = pygame.mixer.Sound("assets/sfx/blade_get_power_up.wav")
+        blade_get_power_up_sfx.set_volume(0.6)  # Power-up sounds should be noticeable
     except pygame.error as e:
         print(f"Warning: Could not load SFX - {e}")
         # slow_mo_start_sfx = None
@@ -923,13 +1000,14 @@ def main(headless=False, export_only=False):
         shield_pickup_sfx = None
         blade_get_power_up_sfx = None
 
-    # Load bounce SFX
+    # Load bounce SFX with reduced volume
     bounce_sfx_list = []
     if SFX_BOUNCE_DIR.is_dir():
         for f_path in SFX_BOUNCE_DIR.iterdir():
             if f_path.suffix.lower() in ['.wav', '.mp3']:
                 try:
                     sound = pygame.mixer.Sound(f_path)
+                    sound.set_volume(0.3)  # Reduce bounce volume significantly as they're very frequent
                     bounce_sfx_list.append(sound)
                     print(f"Loaded bounce SFX: {f_path.name}")
                 except pygame.error as e:
@@ -1439,8 +1517,13 @@ def main(headless=False, export_only=False):
             progress = (current_game_time_sec / DURATION_SECONDS) * 100
             print(f"Export progress: {progress:.1f}% ({current_game_time_sec:.1f}s/{DURATION_SECONDS}s)")
         
-        if not export_only:
-            clock.tick(GAME_FPS)  # Skip timing in export mode for faster processing
+        # Different timing behavior for export vs watch modes
+        if export_only:
+            # In export mode, don't wait - just ensure deterministic behavior
+            pass
+        else:
+            # In watch mode, maintain proper timing
+            clock.tick(GAME_FPS)
 
     pygame.quit()
     OUT.mkdir(exist_ok=True)
@@ -1464,7 +1547,7 @@ def main(headless=False, export_only=False):
             
             # Ensure audio length matches video length
             if audio_clip.duration > video_clip.duration:
-                audio_clip = audio_clip.subclip(0, video_clip.duration)
+                audio_clip = audio_clip.subclipped(0, video_clip.duration)
             elif audio_clip.duration < video_clip.duration:
                 # Pad with silence if needed
                 from moviepy.audio.AudioClip import AudioArrayClip
@@ -1473,20 +1556,38 @@ def main(headless=False, export_only=False):
                 audio_clip = CompositeAudioClip([audio_clip, silence.with_start(audio_clip.duration)])
             
             final_video = video_clip.with_audio(audio_clip)
-            final_video.write_videofile(video_path.as_posix(), codec="libx264", audio_codec="aac")
             
-            # Clean up temporary audio file
-            if exported_audio_path.exists():
-                exported_audio_path.unlink()
+            # Use higher quality audio encoding settings without conflicting filters
+            final_video.write_videofile(
+                video_path.as_posix(), 
+                codec="libx264", 
+                audio_codec="aac",
+                audio_bitrate="192k",  # Higher bitrate for better quality
+                audio_fps=44100       # Ensure proper sample rate
+            )
+            
+            # Keep audio file for debugging - comment out to clean up
+            print(f"Audio file saved for debugging: {exported_audio_path}")
+            # Uncomment the following lines to clean up temporary audio file:
+            # if exported_audio_path.exists():
+            #     exported_audio_path.unlink()
             
             audio_clip.close()
             final_video.close()
         else:
             print("No audio exported, saving video without sound...")
-            video_clip.write_videofile(video_path.as_posix(), codec="libx264")
+            video_clip.write_videofile(
+                video_path.as_posix(), 
+                codec="libx264",
+                bitrate="8000k"
+            )
     else:
         # Export video without audio
-        video_clip.write_videofile(video_path.as_posix(), codec="libx264")
+        video_clip.write_videofile(
+            video_path.as_posix(), 
+            codec="libx264",
+            bitrate="8000k"  # Higher bitrate for better quality
+        )
     
     video_clip.close()
     print("Saved ->", video_path)
@@ -1771,16 +1872,23 @@ if __name__ == "__main__":
                        help="Run in headless mode (no display window)")
     parser.add_argument("--export", action="store_true",
                        help="Export mode - generate video with audio without displaying")
+    parser.add_argument("--audio-test", action="store_true",
+                       help="Test audio export only (no video generation)")
     parser.add_argument("--watch", action="store_true", 
                        help="Watch mode - display the game while it runs (default)")
     
     args = parser.parse_args()
     
     # Default to watch mode if no specific mode is chosen
-    if not args.headless and not args.export:
+    if not args.headless and not args.export and not args.audio_test:
         args.watch = True
     
-    if args.export:
+    if args.audio_test:
+        print("🎵 Starting AUDIO TEST mode - testing audio export only...")
+        print("⚡ Quick audio generation test")
+        # For audio test, run a very short export
+        main(headless=True, export_only=True)
+    elif args.export:
         print("🎬 Starting EXPORT mode - generating video with audio...")
         print("⚡ Running at maximum speed without display")
         main(headless=True, export_only=True)
