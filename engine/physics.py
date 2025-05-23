@@ -60,7 +60,7 @@ def make_space(arena_size=(800, 800), border_thickness=6):
     ]
 
     for s in static_segments:
-        s.elasticity = 1.3 # Super bouncy walls for faster action (increased from 1.0)
+        s.elasticity = 1.5 # Extra bouncy walls for more dynamic gameplay
         s.friction = 0.5 # Some friction
         s.collision_type = WALL_COLLISION_TYPE # Assign specific type to walls
         space.add(s)
@@ -159,29 +159,51 @@ def register_saw_hits(space, battle_context, dmg=1):
     """
     handler = space.add_collision_handler(1, 2)
 
-    def post_solve(arbiter, _space, _data):
+    def begin(arbiter, _space, _data):
         saw_shape = arbiter.shapes[0] if hasattr(arbiter.shapes[0], "saw_ref") else arbiter.shapes[1]
         orb_shape = arbiter.shapes[1] if hasattr(arbiter.shapes[0], "saw_ref") else arbiter.shapes[0]
         
         saw = saw_shape.saw_ref
         orb_hit_by_saw = orb_shape.orb_ref
 
+        print(f"DEBUG: Saw collision detected between {saw.owner.name}'s saw and {orb_hit_by_saw.name}")
+
         if orb_hit_by_saw == saw.owner or not saw.alive:
-            return
+            print(f"DEBUG: Ignoring collision (owner or dead saw)")
+            return True  # Continue with collision but no damage
         
         was_shielded_at_impact = orb_hit_by_saw.is_shielded
 
         # Process the actual hit and shield interaction
+        print(f"DEBUG: {orb_hit_by_saw.name} taking {dmg} damage from saw")
         orb_hit_by_saw.take_hit(dmg) # This might change orb_hit_by_saw.is_shielded
 
         # Determine particle color and sound based on whether the shield took the hit
         if was_shielded_at_impact:
             particle_base_color = (173, 216, 230)  # Light Blue
             particle_fade_color = (70, 130, 180)   # Steel Blue
+            # Blue shockwave for shield break
+            if battle_context.particle_emitter:
+                battle_context.particle_emitter.emit_shockwave(
+                    orb_hit_by_saw.body.position, 
+                    max_radius=150, 
+                    lifespan=0.6, 
+                    color=(100, 150, 255, 180),  # Blue with alpha
+                    thickness=5
+                )
             # Shield loss sound is now handled by the take_hit method callback
         else:
             particle_base_color = (255, 20, 20)    # Bright Red
             particle_fade_color = (100, 0, 0)      # Darker Red
+            # Red shockwave for blade hit
+            if battle_context.particle_emitter:
+                battle_context.particle_emitter.emit_shockwave(
+                    orb_hit_by_saw.body.position, 
+                    max_radius=120, 
+                    lifespan=0.5, 
+                    color=(255, 50, 50, 200),  # Red with alpha
+                    thickness=4
+                )
             battle_context.play_sfx(battle_context.hit_blade_sfx) # Play normal hit sound only if no shield took the hit
 
         battle_context.camera.shake(intensity=8, duration=0.25) # Shake camera regardless
@@ -203,8 +225,10 @@ def register_saw_hits(space, battle_context, dmg=1):
             )
         
         saw.destroy() # Call new destroy without space arg
+        
+        return True  # Continue with collision processing
 
-    handler.post_solve = post_solve
+    handler.begin = begin
 
 def register_pickup_handler(space, battle_context):
     handler = space.add_collision_handler(1, 3) # orb vs pickup
@@ -256,6 +280,12 @@ def register_pickup_handler(space, battle_context):
             if not orb.has_saw:
                 orb.has_saw = Saw(battle_context.blade_img, orb, space) # Saw now stores its own space
                 globals()["active_saws"].append(orb.has_saw)
+                
+                # Give initial velocity boost when picking up blade (maintain trajectory)
+                current_vel = orb.body.velocity
+                boost_factor = 1.8  # 80% velocity boost on pickup for satisfying effect
+                orb.body.velocity = current_vel * boost_factor
+                
                 print(f"'{orb.name}' picked up a saw!")
                 battle_context.play_sfx(battle_context.blade_get_power_up_sfx)
             else:
@@ -342,6 +372,7 @@ def register_orb_wall_collisions(space, battle_context):
         # arbiter.shapes[1] is Wall (type WALL_COLLISION_TYPE)
         orb_shape = arbiter.shapes[0]
         wall_shape = arbiter.shapes[1]
+        orb = orb_shape.orb_ref
         
         # Get collision point and normal
         contact_points = arbiter.contact_point_set.points
@@ -352,6 +383,31 @@ def register_orb_wall_collisions(space, battle_context):
             # Simple camera shake for wall impacts
             if hasattr(battle_context, 'camera'):
                 battle_context.camera.shake(intensity=3, duration=0.1)
+            
+            # Add trajectory randomization for blade-equipped orbs
+            if orb.has_saw:
+                # Get current velocity
+                current_velocity = orb.body.velocity
+                velocity_magnitude = current_velocity.length
+                
+                if velocity_magnitude > 0:
+                    # Calculate current angle
+                    current_angle = math.atan2(current_velocity.y, current_velocity.x)
+                    
+                    # Add random deviation (10% of pi radians = ~18 degrees max deviation)
+                    max_deviation = math.pi * 0.1  # 10% of 180 degrees
+                    random_deviation = random.uniform(-max_deviation, max_deviation)
+                    new_angle = current_angle + random_deviation
+                    
+                    # Apply the randomized velocity after normal collision response
+                    def apply_randomized_velocity():
+                        new_velocity_x = velocity_magnitude * math.cos(new_angle)
+                        new_velocity_y = velocity_magnitude * math.sin(new_angle)
+                        orb.body.velocity = (new_velocity_x, new_velocity_y)
+                    
+                    # Schedule the velocity change for after the collision is processed
+                    _space.add_post_step_callback(lambda space, key, data: apply_randomized_velocity(), 
+                                                f"randomize_velocity_{id(orb)}", None)
             
             # Simple wall collision particles - much lighter than before
             if battle_context.particle_emitter and arbiter.is_first_contact:

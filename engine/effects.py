@@ -84,9 +84,60 @@ class Particle:
                              (int(render_center_x), int(render_center_y)), 
                              max(1, int(self.radius)))
 
+@dataclass
+class Shockwave:
+    position: pygame.math.Vector2
+    radius: float
+    max_radius: float
+    lifespan: float
+    max_lifespan: float
+    color: tuple[int, int, int]
+    thickness: int
+
+    def __init__(self, position, max_radius, lifespan, color, thickness=3):
+        self.position = pygame.math.Vector2(position)
+        self.radius = 0
+        self.max_radius = max_radius
+        self.lifespan = lifespan
+        self.max_lifespan = lifespan
+        self.color = color
+        self.thickness = thickness
+
+    def update(self, dt):
+        if self.lifespan <= 0:
+            return
+        
+        self.lifespan -= dt
+        life_ratio = max(0, self.lifespan / self.max_lifespan)
+        
+        # Radius grows quickly then fades
+        self.radius = self.max_radius * (1 - life_ratio)
+        
+        # Alpha decreases over time
+        alpha = int(255 * life_ratio)
+        self.color = (*self.color[:3], alpha)
+
+    def draw(self, surface, total_arena_offset_on_screen: pygame.math.Vector2):
+        if self.lifespan > 0 and self.radius > 0:
+            render_center_x = self.position.x + total_arena_offset_on_screen.x
+            render_center_y = self.position.y + total_arena_offset_on_screen.y
+            
+            # Create surface with alpha for transparency
+            if len(self.color) > 3:
+                temp_surface = pygame.Surface((self.radius * 2 + 20, self.radius * 2 + 20), pygame.SRCALPHA)
+                pygame.draw.circle(temp_surface, self.color, 
+                                 (int(self.radius + 10), int(self.radius + 10)), 
+                                 int(self.radius), self.thickness)
+                surface.blit(temp_surface, (render_center_x - self.radius - 10, render_center_y - self.radius - 10))
+            else:
+                pygame.draw.circle(surface, self.color, 
+                                 (int(render_center_x), int(render_center_y)), 
+                                 int(self.radius), self.thickness)
+
 class ParticleEmitter:
     def __init__(self):
         self.particles: list[Particle] = []
+        self.shockwaves: list[Shockwave] = []
         # Define default physics properties for particles, can be overridden in emit or globally changed
         self.gravity = pygame.math.Vector2(0, 250) # Pixels/sec^2, positive Y is down
         self.drag = 0.98 # Factor per second for velocity reduction (e.g., 0.98 means 2% reduction per sec)
@@ -139,11 +190,25 @@ class ParticleEmitter:
             particle.bounces_remaining = self.default_particle_bounces 
             self.particles.append(particle)
 
+    def emit_shockwave(self, position, max_radius=100, lifespan=0.8, color=(255, 0, 0), thickness=4):
+        """Emit a shockwave effect at the given position"""
+        shockwave = Shockwave(position, max_radius, lifespan, color, thickness)
+        self.shockwaves.append(shockwave)
+
     def update(self, dt, arena_rect: pygame.Rect):
         self.particles = [p for p in self.particles if p.lifespan > 0]
         for particle in self.particles:
             particle.update(dt, arena_rect, self.gravity, self.drag) # Pass through physics params
+        
+        # Update shockwaves
+        self.shockwaves = [s for s in self.shockwaves if s.lifespan > 0]
+        for shockwave in self.shockwaves:
+            shockwave.update(dt)
 
     def draw(self, surface, total_arena_offset_on_screen: pygame.math.Vector2):
         for particle in self.particles:
-            particle.draw(surface, total_arena_offset_on_screen) 
+            particle.draw(surface, total_arena_offset_on_screen)
+        
+        # Draw shockwaves
+        for shockwave in self.shockwaves:
+            shockwave.draw(surface, total_arena_offset_on_screen) 

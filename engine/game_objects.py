@@ -47,12 +47,18 @@ class Orb:
                 # Animation finished, ensure current hp is the target (should already be)
                 # self.hp = self.hp_target_for_animation # This should be done by take_hit/heal
 
-        # Velocity capping
+        # Velocity capping with blade speed reduction
         if self.body: 
             velocity = self.body.velocity
             speed = velocity.length
-            if speed > MAX_ORB_VELOCITY:
-                self.body.velocity = velocity.normalized() * MAX_ORB_VELOCITY
+            
+            # Apply blade speed reduction if orb has a saw equipped
+            max_velocity = MAX_ORB_VELOCITY
+            if self.has_saw:
+                max_velocity = MAX_ORB_VELOCITY * 2  # 50% slower when blade equipped
+            
+            if speed > max_velocity:
+                self.body.velocity = velocity.normalized() * max_velocity
         
         # Update previous_hp at the end of the update, before next frame's input processing
         # This is crucial for renderer to correctly diff current vs previous visual state
@@ -191,7 +197,7 @@ class Orb:
         body.velocity = random.choice([(250,150), (-200,230), (200,-220)])
 
         shape = pymunk.Circle(body, radius)
-        shape.elasticity = 1.0
+        shape.elasticity = 1.2  # Increased bounce for more dynamic collisions
         shape.collision_type = 1          # <- on tag toutes les orbs = 1
         shape.orb_ref = self              # <- pour savoir qui est touché
 
@@ -305,6 +311,7 @@ class Saw:
         body.position = owner_orb.body.position
         shape = pymunk.Circle(body, r)
         shape.collision_type = 2 # Collision type for saws
+        shape.sensor = True  # Make saw a sensor to avoid physics interference
         shape.saw_ref = self
         space.add(body, shape)
         self.body, self.shape = body, shape
@@ -319,7 +326,8 @@ class Saw:
 
         self.angle += self.omega * dt
         self.body.position = self.owner.body.position
-        self.body.velocity = self.owner.body.velocity # Match owner's velocity for better kinematic collisions
+        # Since saw is now a sensor, we can safely match velocity for accurate collision detection
+        self.body.velocity = self.owner.body.velocity
         self.sprite = pygame.transform.rotate(self.sprite_orig, -self.angle)
 
     def draw(self, screen, offset=(0, 0)):
