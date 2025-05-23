@@ -74,8 +74,8 @@ class Orb:
             screen.blit(shield_surface, (int(x - shield_radius), int(y - shield_radius)))
             
         # Draw outline next
-        outline_radius = self.shape.radius + 3 # Slightly larger for outline
-        pygame.draw.circle(screen, self.outline_color, (int(x), int(y)), int(outline_radius), width=3)
+        outline_radius = self.shape.radius + 5 # Slightly larger for outline
+        pygame.draw.circle(screen, self.outline_color, (int(x), int(y)), int(outline_radius), width=5)
 
         # Draw logo on top of everything
         rect = self.logo_surface.get_rect(center=(x, y))

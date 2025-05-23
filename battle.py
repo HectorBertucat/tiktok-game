@@ -78,6 +78,13 @@ class PredictiveBattleDirector:
         self.interaction_density = []    # Track interaction frequency over time
         self.orb_aggression_scores = {}  # Track how aggressive each orb has been
         
+        # Enhanced damage rate tracking for better duration prediction
+        self.damage_events = []          # Track all damage events with timestamps
+        self.heal_events = []            # Track all heal events with timestamps
+        self.last_health_snapshot = {}   # Track orb health at regular intervals
+        self.health_snapshot_interval = 5.0  # Take health snapshots every 5 seconds
+        self.last_snapshot_time = 0
+        
         # Predictive parameters
         self.prediction_horizon = 8.0   # Predict up to 8 seconds ahead
         self.analysis_interval = 2.0    # Re-analyze every 2 seconds
@@ -98,6 +105,11 @@ class PredictiveBattleDirector:
     def analyze_battle_state(self, current_time, orbs, battle_context):
         """Analyze current battle state and predict optimal item placements"""
         
+        # Take regular health snapshots for trend analysis
+        if current_time >= self.last_snapshot_time + self.health_snapshot_interval:
+            self.take_health_snapshot(current_time, orbs)
+            self.last_snapshot_time = current_time
+        
         # Determine current game phase
         phase = self.get_game_phase(current_time)
         
@@ -107,8 +119,8 @@ class PredictiveBattleDirector:
         # Predict future interactions
         interaction_predictions = self.predict_future_interactions(orbs, battle_context, 5.0)
         
-        # Calculate time pressure (how close we are to target end time)
-        time_pressure = self.calculate_time_pressure(current_time, orb_analysis)
+        # Calculate enhanced time pressure that accounts for damage rates
+        time_pressure = self.calculate_enhanced_time_pressure(current_time, orb_analysis, orbs)
         
         # Generate strategic spawning plan
         spawning_plan = self.generate_spawning_strategy(
@@ -116,6 +128,105 @@ class PredictiveBattleDirector:
         )
         
         return spawning_plan
+    
+    def take_health_snapshot(self, current_time, orbs):
+        """Take a snapshot of current orb health for trend analysis"""
+        snapshot = {
+            'time': current_time,
+            'orb_health': {orb.name: orb.hp for orb in orbs},
+            'total_health': sum(orb.hp for orb in orbs),
+            'living_orbs': len([orb for orb in orbs if orb.hp > 0])
+        }
+        self.last_health_snapshot = snapshot
+    
+    def calculate_damage_rate(self, current_time, lookback_time=20.0):
+        """Calculate the recent damage rate (HP lost per second)"""
+        cutoff_time = current_time - lookback_time
+        
+        # Get recent damage events
+        recent_damage = [event for event in self.damage_events if event['time'] > cutoff_time]
+        recent_heals = [event for event in self.heal_events if event['time'] > cutoff_time]
+        
+        if not recent_damage and not recent_heals:
+            return 0.0
+        
+        # Calculate net damage over the period
+        total_damage = sum(event['damage'] for event in recent_damage)
+        total_healing = sum(event['healing'] for event in recent_heals)
+        net_damage = total_damage - total_healing
+        
+        if lookback_time <= 0:
+            return 0.0
+        
+        return net_damage / lookback_time
+    
+    def predict_game_end_time(self, current_time, orbs):
+        """Predict when the game will end based on current health and damage trends"""
+        if len(orbs) < 2:
+            return current_time  # Game should end immediately
+        
+        # Get current health state
+        orb_healths = [orb.hp for orb in orbs if orb.hp > 0]
+        if len(orb_healths) < 2:
+            return current_time  # Game should end immediately
+        
+        orb_healths.sort()
+        weakest_hp = orb_healths[0]
+        second_weakest_hp = orb_healths[1] if len(orb_healths) > 1 else orb_healths[0]
+        
+        # Calculate damage rate
+        damage_rate = self.calculate_damage_rate(current_time)
+        
+        # If no recent damage, use a conservative estimate
+        if damage_rate <= 0:
+            # Assume a modest damage rate based on game phase
+            if current_time < self.early_game_phase:
+                estimated_damage_rate = 0.5  # HP per second
+            elif current_time < self.mid_game_phase:
+                estimated_damage_rate = 0.8
+            else:
+                estimated_damage_rate = 1.2
+        else:
+            estimated_damage_rate = damage_rate
+        
+        # Predict time until weakest orb dies
+        if estimated_damage_rate > 0:
+            time_until_death = weakest_hp / estimated_damage_rate
+        else:
+            time_until_death = float('inf')
+        
+        # Consider that the game might continue a bit after first death
+        # Add some buffer time for dramatic effect
+        buffer_time = min(10.0, max(3.0, time_until_death * 0.2))
+        
+        predicted_end_time = current_time + time_until_death + buffer_time
+        
+        return predicted_end_time
+    
+    def calculate_enhanced_time_pressure(self, current_time, orb_analysis, orbs):
+        """Enhanced time pressure calculation that accounts for damage rates and predicted end time"""
+        # Get basic time pressure
+        basic_time_pressure = self.calculate_time_pressure(current_time, orb_analysis)
+        
+        # Predict when the game will actually end
+        predicted_end_time = self.predict_game_end_time(current_time, orbs)
+        
+        # Calculate pressure based on predicted vs target end time
+        target_end_time = self.target_duration
+        time_difference = predicted_end_time - target_end_time
+        
+        # If game is predicted to end too early, apply EXTENSION pressure (negative time pressure)
+        if time_difference < -10:  # Game ending more than 10 seconds early
+            extension_pressure = -min(0.8, abs(time_difference) / 20.0)  # Negative pressure to extend
+            return extension_pressure
+        
+        # If game is predicted to end too late, apply ACCELERATION pressure
+        elif time_difference > 10:  # Game ending more than 10 seconds late
+            acceleration_pressure = min(1.0, time_difference / 15.0)
+            return max(basic_time_pressure, acceleration_pressure)
+        
+        # Game timing looks good, use basic pressure
+        return basic_time_pressure
     
     def get_game_phase(self, current_time):
         """Determine which phase of the battle we're in"""
@@ -129,6 +240,7 @@ class PredictiveBattleDirector:
     def analyze_orb_states(self, orbs, current_time):
         """Analyze current orb health, positioning, and aggression levels"""
         analysis = {
+            'orbs': orbs,  # Include the orbs list for use in other methods
             'total_health': sum(orb.hp for orb in orbs),
             'health_disparity': max(orb.hp for orb in orbs) - min(orb.hp for orb in orbs),
             'low_health_orbs': [orb for orb in orbs if orb.hp <= 2],
@@ -244,9 +356,10 @@ class PredictiveBattleDirector:
         # Get base weights for current phase
         base_weights = self.phase_weights[phase].copy()
         
-        # Adjust weights based on battle state
+        # Adjust weights based on battle state (pass orbs from orb_analysis)
+        orbs_for_prediction = orb_analysis.get('orbs', [])
         weights = self.adjust_weights_for_situation(
-            base_weights, orb_analysis, time_pressure, current_time
+            base_weights, orb_analysis, time_pressure, current_time, orbs_for_prediction
         )
         
         # Generate immediate spawns for critical situations
@@ -265,16 +378,41 @@ class PredictiveBattleDirector:
         
         return strategy
     
-    def adjust_weights_for_situation(self, base_weights, orb_analysis, time_pressure, current_time):
+    def adjust_weights_for_situation(self, base_weights, orb_analysis, time_pressure, current_time, orbs=None):
         """Adjust spawning weights based on current battle situation"""
         weights = base_weights.copy()
         
-        # High time pressure: favor bombs and saws to end the battle
-        if time_pressure > 0.7:
+        # Get predicted game end time for more informed decisions
+        if orbs:
+            predicted_end = self.predict_game_end_time(current_time, orbs)
+            time_until_predicted_end = predicted_end - current_time
+        else:
+            # Fallback: estimate based on health and time pressure
+            time_until_predicted_end = self.target_duration - current_time
+        
+        # Game ending too early: prioritize hearts and shields to extend (NEGATIVE time pressure)
+        if time_pressure < -0.1:  # Negative time pressure means extend the game
+            weights['heart'] *= 4.0  # Heavily favor hearts
+            weights['shield'] *= 3.0  # Favor shields
+            weights['saw'] *= 0.2     # Reduce offensive items
+            weights['bomb'] *= 0.1    # Heavily reduce bombs
+            print(f"🎯 Game ending early (predicted: {time_until_predicted_end:.1f}s), EXTENDING with defensive items")
+        
+        # High positive time pressure: favor bombs and saws to end the battle
+        elif time_pressure > 0.7:
             weights['bomb'] *= 3
             weights['saw'] *= 2
             weights['heart'] *= 0.3
             weights['shield'] *= 0.2
+            print(f"🎯 High time pressure, ACCELERATING game end")
+        
+        # Game going too long: increase offensive pressure
+        elif orbs and time_until_predicted_end > self.target_duration - current_time + 15:
+            weights['saw'] *= 2
+            weights['bomb'] *= 2.5
+            weights['heart'] *= 0.4
+            weights['shield'] *= 0.3
+            print(f"🎯 Game running long (predicted: {time_until_predicted_end:.1f}s), increasing offensive pressure")
         
         # Large health disparity: help the weaker orb or pressure the stronger one
         elif orb_analysis['health_disparity'] >= 3:
@@ -288,8 +426,8 @@ class PredictiveBattleDirector:
                 weights['saw'] *= 1.5
                 weights['bomb'] *= 2
         
-        # Very low total health: be more conservative
-        elif orb_analysis['total_health'] <= 4:
+        # Very low total health: be more conservative unless time pressure is high
+        elif orb_analysis['total_health'] <= 4 and time_pressure < 0.7:
             weights['heart'] *= 1.5
             weights['bomb'] *= 0.5
         
@@ -305,22 +443,45 @@ class PredictiveBattleDirector:
         """Generate items that should be spawned immediately"""
         immediate = []
         
-        # Emergency heart for critically low orb (but avoid repetitive healing)
-        critical_orbs = [orb for orb in orb_analysis['low_health_orbs'] if orb.hp == 1]
-        if critical_orbs and time_pressure < 0.8:  # Don't help if we need to end soon
-            orb = critical_orbs[0]
-            # Check if this would create a repetitive pattern
-            if not self.should_avoid_repetitive_pattern(orb.name, +1, self.last_analysis_time):
+        # If time pressure is negative, we need to extend the game - prioritize hearts
+        if time_pressure < -0.1:
+            # Emergency hearts for any low HP orbs to extend the game
+            for orb in orb_analysis['low_health_orbs']:
+                if not self.should_avoid_repetitive_pattern(orb.name, +1, self.last_analysis_time):
+                    immediate.append({
+                        'type': 'heart',
+                        'target_orb': orb.name,
+                        'urgency': 'extend_game',
+                        'reason': 'extend_game_healing'
+                    })
+                    break  # Only spawn one heart at a time
+            
+            # If no low HP orbs, spawn heart for weakest orb anyway
+            if not immediate and orb_analysis['weakest_orb']:
                 immediate.append({
                     'type': 'heart',
-                    'target_orb': orb.name,
-                    'urgency': 'critical',
-                    'reason': 'emergency_healing'
+                    'target_orb': orb_analysis['weakest_orb'].name,
+                    'urgency': 'extend_game',
+                    'reason': 'extend_game_healing'
                 })
         
-        # Decisive bomb if battle needs to end
-        if time_pressure > 0.9 and orb_analysis['health_disparity'] <= 1:
-            # Battle is too close, force a decision
+        # Emergency heart for critically low orb (but not if we need to end soon)
+        elif time_pressure < 0.8:  # Normal emergency healing when not forcing conclusion
+            critical_orbs = [orb for orb in orb_analysis['low_health_orbs'] if orb.hp == 1]
+            if critical_orbs:
+                orb = critical_orbs[0]
+                # Check if this would create a repetitive pattern
+                if not self.should_avoid_repetitive_pattern(orb.name, +1, self.last_analysis_time):
+                    immediate.append({
+                        'type': 'heart',
+                        'target_orb': orb.name,
+                        'urgency': 'critical',
+                        'reason': 'emergency_healing'
+                    })
+        
+        # Decisive bomb only if we need to end the battle (high positive time pressure)
+        elif time_pressure > 0.9 and orb_analysis['health_disparity'] <= 1:
+            # Battle is too close and needs to end, force a decision
             immediate.append({
                 'type': 'bomb',
                 'target_orb': orb_analysis['dominant_orb'].name if orb_analysis['dominant_orb'] else None,
@@ -356,7 +517,7 @@ class PredictiveBattleDirector:
         return scheduled
     
     def track_health_change(self, orb_name, old_hp, new_hp, current_time, reason):
-        """Track health changes to avoid repetitive patterns"""
+        """Track health changes to avoid repetitive patterns and analyze damage rates"""
         change = {
             'orb': orb_name,
             'old_hp': old_hp,
@@ -368,9 +529,27 @@ class PredictiveBattleDirector:
         
         self.health_change_history.append(change)
         
-        # Keep only recent history (last 20 seconds)
-        cutoff_time = current_time - 20.0
+        # Track damage and heal events separately for rate analysis
+        if new_hp < old_hp:  # Damage event
+            self.damage_events.append({
+                'orb': orb_name,
+                'damage': old_hp - new_hp,
+                'time': current_time,
+                'reason': reason
+            })
+        elif new_hp > old_hp:  # Heal event
+            self.heal_events.append({
+                'orb': orb_name,
+                'healing': new_hp - old_hp,
+                'time': current_time,
+                'reason': reason
+            })
+        
+        # Keep only recent history (last 30 seconds for detailed analysis)
+        cutoff_time = current_time - 30.0
         self.health_change_history = [h for h in self.health_change_history if h['time'] > cutoff_time]
+        self.damage_events = [d for d in self.damage_events if d['time'] > cutoff_time]
+        self.heal_events = [h for h in self.heal_events if h['time'] > cutoff_time]
         
         return change
     
@@ -512,9 +691,9 @@ def main():
     # The ARENA_WIDTH_FROM_CFG from cfg is effectively CANVAS_W now from generator.
     ARENA_WIDTH_FROM_CFG = cfg.get("arena_width", CANVAS_W) # Ensure this is used, should be CANVAS_W
     ARENA_HEIGHT_FROM_CFG = cfg.get("arena_height", ARENA_H) # Use global ARENA_H as fallback
-    ORB_RADIUS_CFG = cfg.get("orb_radius", 80)
+    ORB_RADIUS_CFG = cfg.get("orb_radius", 150)
     PICKUP_RADIUS_CFG = cfg.get("pickup_radius", 20) # Default if not in cfg
-    BORDER_THICKNESS_CFG = int(cfg.get("border_thickness", 15)) # Ensure integer for Pygame
+    BORDER_THICKNESS_CFG = int(cfg.get("border_thickness", 30)) # Ensure integer for Pygame
     BORDER_COLOR_CFG = tuple(cfg.get("border_color", [255, 0, 90]))
     BORDER_FLASH_COLOR_CFG = tuple(cfg.get("border_flash_color", [255, 255, 0]))
     DEFAULT_FLASH_DURATION_CFG = cfg.get("default_flash_duration", 1.0)
@@ -674,10 +853,12 @@ def main():
 
     frames, winner = [], None
     current_game_time_sec = 0.0 # Initialize current game time
-
-    for frame_idx in range(int(DURATION_SECONDS * GAME_FPS)):
-        previous_game_time_sec = current_game_time_sec
-        current_game_time_sec = frame_idx / GAME_FPS
+    frames_to_generate = int(DURATION_SECONDS * GAME_FPS)
+    # Initialize AI strategy for use throughout the loop
+    ai_strategy = None
+    
+    for frame_i in range(frames_to_generate):
+        current_game_time_sec = frame_i / GAME_FPS
         battle_context.current_game_time_sec = current_game_time_sec # Update context
 
         for event in pygame.event.get():
@@ -729,9 +910,7 @@ def main():
                 if p in pickups:
                     pickups.remove(p)
 
-        # --- Advanced AI Battle Director Integration ---
-        # Let the AI director analyze the battle and provide strategic spawning guidance
-        ai_strategy = None
+        # --- AI Director Analysis ---
         if current_game_time_sec >= battle_director.last_analysis_time + battle_director.analysis_interval:
             ai_strategy = battle_director.analyze_battle_state(current_game_time_sec, orbs, battle_context)
             battle_director.last_analysis_time = current_game_time_sec
@@ -757,7 +936,17 @@ def main():
                     })
                     print(f"🤖 AI Director: {spawn_plan['reason']} -> spawning {spawn_plan['type']}")
             
-            print(f"🎯 AI Phase: {battle_director.get_game_phase(current_game_time_sec)}, Time Pressure: {battle_director.calculate_time_pressure(current_game_time_sec, battle_director.analyze_orb_states(orbs, current_game_time_sec)):.2f}")
+            # Enhanced debug information
+            orb_analysis = battle_director.analyze_orb_states(orbs, current_game_time_sec)
+            time_pressure = battle_director.calculate_enhanced_time_pressure(current_game_time_sec, orb_analysis, orbs)
+            predicted_end = battle_director.predict_game_end_time(current_game_time_sec, orbs)
+            damage_rate = battle_director.calculate_damage_rate(current_game_time_sec)
+            
+            print(f"🎯 AI Phase: {battle_director.get_game_phase(current_game_time_sec)}, "
+                  f"Time Pressure: {time_pressure:.2f}, "
+                  f"Predicted End: {predicted_end:.1f}s (target: {battle_director.target_duration}s), "
+                  f"Damage Rate: {damage_rate:.2f} HP/s, "
+                  f"Total HP: {orb_analysis['total_health']}")
         
         # --- Unified Dynamic Pickup Spawning Logic Integration ---
         num_current_pickups = len(pickups)
@@ -902,7 +1091,7 @@ def main():
         living = [o for o in orbs if o.hp > 0]
         if winner is None and len(living) == 1 and len(orbs) > 1: # Ensure game started with >1 orb
             winner = living[0]
-            win_frame = frame_idx
+            win_frame = frame_i
             print(f"WINNER: {winner.name} at frame {win_frame} ({current_game_time_sec:.2f}s)")
             # Optionally add a text overlay for winner announcement via director or directly
             # Example direct text overlay (not using director for this immediate announcement)
@@ -964,7 +1153,7 @@ def main():
                 orb_to_draw.draw(screen, offset=(arena_render_offset_x, arena_render_offset_y))
 
         if winner:
-            if frame_idx - win_frame < 2 * GAME_FPS:
+            if frame_i - win_frame < 2 * GAME_FPS:
                 giant = pygame.transform.smoothscale(
                     winner.logo_surface, (300, 300))
                 rect = giant.get_rect(center=(CANVAS_W//2, CANVAS_H//2))
@@ -1166,7 +1355,7 @@ def predict_orb_future_path_point(target_orb_data, all_orbs_data, game_env_param
     # The segments' own radius (border_segment_radius) makes them thick.
     # This setup ensures the *inner edges* of the physical walls are at:
     # y=0, y=arena_h, x=0, x=arena_w.
-    
+
     # Coordinates for the centerlines of the wall segments
     # Top: centerline at y = -border_segment_radius. Inner edge at y = 0.
     # Bottom: centerline at y = arena_h + border_segment_radius. Inner edge at y = arena_h.

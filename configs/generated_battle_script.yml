@@ -1,14 +1,14 @@
 title: Generated Battle Scenario
-orb_radius: 80.0
+orb_radius: 120.0
 pickup_radius: 30.0
 arena_width: 1080
-arena_height: 1000.0
+arena_height: 1300
 fps: 60
-border_thickness: 20.0
+border_thickness: 40.0
 border_color:
+  - 50
+  - 175
   - 255
-  - 0
-  - 90
 border_flash_color:
   - 255
   - 255
@@ -41,57 +41,3 @@ orbs:
     initial_velocity:
       - -459.43
       - -11.08
-events:
-  - t: 1.48
-    type: spawn_pickup
-    kind: saw
-    x: 838.3043204649678
-    y: 755.3161780662243
-  - t: 6.78
-    type: spawn_pickup
-    kind: heart
-    x: 286.1660566763811
-    y: 734.1789914817332
-  - t: 14.68
-    type: spawn_pickup
-    kind: heart
-    x: 405.8191434366142
-    y: 182.57177960646638
-  - t: 20.22
-    type: spawn_pickup
-    kind: shield
-  - t: 25.23
-    type: spawn_pickup
-    kind: bomb
-    x: 860.863560075948
-    y: 515.6899178032816
-  - t: 32.25
-    type: spawn_pickup
-    kind: heart
-    x: 120.09785860748805
-    y: 945.1051345565822
-  - t: 39.68
-    type: spawn_pickup
-    kind: heart
-    x: 195.26701132563832
-    y: 276.7831688710932
-  - t: 46.45
-    type: spawn_pickup
-    kind: bomb
-    x: 983.520961248727
-    y: 580.5216832753634
-  - t: 50.58
-    type: spawn_pickup
-    kind: heart
-    x: 583.9003964519436
-    y: 276.55053238808017
-  - t: 55.83
-    type: spawn_pickup
-    kind: saw
-    x: 960.080602614655
-    y: 326.6884011183833
-  - t: 63.75
-    type: spawn_pickup
-    kind: saw
-    x: 836.2001016433916
-    y: 843.9640249776534
