@@ -186,10 +186,10 @@ def register_saw_hits(space, battle_context, dmg=1):
             if battle_context.particle_emitter:
                 battle_context.particle_emitter.emit_shockwave(
                     orb_hit_by_saw.body.position, 
-                    max_radius=150, 
-                    lifespan=0.6, 
-                    color=(100, 150, 255, 180),  # Blue with alpha
-                    thickness=5
+                    max_radius=250, 
+                    lifespan=1.0, 
+                    color=(100, 150, 255),  # Blue
+                    thickness=8
                 )
             # Shield loss sound is now handled by the take_hit method callback
         else:
@@ -199,10 +199,10 @@ def register_saw_hits(space, battle_context, dmg=1):
             if battle_context.particle_emitter:
                 battle_context.particle_emitter.emit_shockwave(
                     orb_hit_by_saw.body.position, 
-                    max_radius=120, 
-                    lifespan=0.5, 
-                    color=(255, 50, 50, 200),  # Red with alpha
-                    thickness=4
+                    max_radius=200, 
+                    lifespan=0.8, 
+                    color=(255, 50, 50),  # Red
+                    thickness=6
                 )
             battle_context.play_sfx(battle_context.hit_blade_sfx) # Play normal hit sound only if no shield took the hit
 

@@ -122,17 +122,73 @@ class Shockwave:
             render_center_x = self.position.x + total_arena_offset_on_screen.x
             render_center_y = self.position.y + total_arena_offset_on_screen.y
             
-            # Create surface with alpha for transparency
-            if len(self.color) > 3:
-                temp_surface = pygame.Surface((self.radius * 2 + 20, self.radius * 2 + 20), pygame.SRCALPHA)
-                pygame.draw.circle(temp_surface, self.color, 
-                                 (int(self.radius + 10), int(self.radius + 10)), 
-                                 int(self.radius), self.thickness)
-                surface.blit(temp_surface, (render_center_x - self.radius - 10, render_center_y - self.radius - 10))
-            else:
-                pygame.draw.circle(surface, self.color, 
-                                 (int(render_center_x), int(render_center_y)), 
-                                 int(self.radius), self.thickness)
+            life_ratio = max(0, self.lifespan / self.max_lifespan)
+            
+            # Enhanced multi-ring shockwave with grid interaction
+            base_alpha = int(255 * life_ratio * 0.8)
+            
+            # Main shockwave rings
+            for ring in range(3):
+                ring_radius = self.radius - (ring * 20)
+                if ring_radius > 0:
+                    ring_alpha = max(0, base_alpha - (ring * 60))
+                    ring_thickness = max(1, self.thickness - ring)
+                    
+                    # Create surface for each ring
+                    ring_surface = pygame.Surface((ring_radius * 2 + 40, ring_radius * 2 + 40), pygame.SRCALPHA)
+                    ring_color = (*self.color[:3], ring_alpha)
+                    
+                    # Draw main ring
+                    pygame.draw.circle(ring_surface, ring_color, 
+                                     (int(ring_radius + 20), int(ring_radius + 20)), 
+                                     int(ring_radius), ring_thickness)
+                    
+                    # Add grid distortion effect
+                    grid_size = 80  # Match the arena grid size
+                    grid_alpha = int(ring_alpha * 0.3)
+                    
+                    # Draw intersecting grid lines that react to the shockwave
+                    center_grid_x = int((render_center_x) // grid_size) * grid_size
+                    center_grid_y = int((render_center_y) // grid_size) * grid_size
+                    
+                    # Highlight nearby grid lines
+                    for grid_offset in range(-2, 3):
+                        # Vertical lines
+                        grid_x = center_grid_x + (grid_offset * grid_size)
+                        if abs(grid_x - render_center_x) < ring_radius:
+                            intensity = 1.0 - (abs(grid_x - render_center_x) / ring_radius)
+                            line_alpha = int(grid_alpha * intensity)
+                            if line_alpha > 0:
+                                line_color = (*self.color[:3], line_alpha)
+                                line_start = (grid_x - render_center_x + ring_radius + 20, 0)
+                                line_end = (grid_x - render_center_x + ring_radius + 20, ring_radius * 2 + 40)
+                                pygame.draw.line(ring_surface, line_color, line_start, line_end, 3)
+                        
+                        # Horizontal lines
+                        grid_y = center_grid_y + (grid_offset * grid_size)
+                        if abs(grid_y - render_center_y) < ring_radius:
+                            intensity = 1.0 - (abs(grid_y - render_center_y) / ring_radius)
+                            line_alpha = int(grid_alpha * intensity)
+                            if line_alpha > 0:
+                                line_color = (*self.color[:3], line_alpha)
+                                line_start = (0, grid_y - render_center_y + ring_radius + 20)
+                                line_end = (ring_radius * 2 + 40, grid_y - render_center_y + ring_radius + 20)
+                                pygame.draw.line(ring_surface, line_color, line_start, line_end, 3)
+                    
+                    # Blit the ring to the main surface
+                    surface.blit(ring_surface, (render_center_x - ring_radius - 20, render_center_y - ring_radius - 20))
+            
+            # Add energy pulse effect
+            pulse_radius = self.radius * 0.7
+            pulse_alpha = int(base_alpha * 0.4)
+            if pulse_alpha > 0:
+                pulse_surface = pygame.Surface((pulse_radius * 2 + 20, pulse_radius * 2 + 20), pygame.SRCALPHA)
+                pulse_color = (*self.color[:3], pulse_alpha)
+                pygame.draw.circle(pulse_surface, pulse_color, 
+                                 (int(pulse_radius + 10), int(pulse_radius + 10)), 
+                                 int(pulse_radius))
+                surface.blit(pulse_surface, (render_center_x - pulse_radius - 10, render_center_y - pulse_radius - 10), 
+                           special_flags=pygame.BLEND_ADD)
 
 class ParticleEmitter:
     def __init__(self):
