@@ -1,10 +1,14 @@
 # battle.py – tout en haut
 import pygame, random, math
-from moviepy import VideoFileClip, ImageSequenceClip
+from moviepy import VideoFileClip, ImageSequenceClip, AudioFileClip, CompositeAudioClip
 from pathlib import Path
 from ruamel.yaml import YAML
 import numpy as np
 import pymunk
+import argparse
+import sys
+import io
+import wave
 
 # from director import Director # Removed Director
 from engine.game_objects import Orb, Saw, Pickup
@@ -671,6 +675,76 @@ class PredictiveBattleDirector:
         if self.bomb_count >= self.max_bombs_per_game:
             print(f"🚫 Bomb limit reached - no more bombs allowed this game")
 
+class AudioRecorder:
+    """Records game audio events for export"""
+    def __init__(self, sample_rate=44100):
+        self.sample_rate = sample_rate
+        self.audio_events = []  # List of (time, sound_data) tuples
+        
+    def record_sound(self, sound, game_time):
+        """Record a sound effect at a specific game time"""
+        if sound:
+            try:
+                # Get raw audio data from pygame sound
+                sound_array = pygame.sndarray.array(sound)
+                self.audio_events.append((game_time, sound_array))
+            except Exception as e:
+                print(f"Warning: Could not record sound - {e}")
+    
+    def export_audio(self, duration, output_path):
+        """Export recorded audio to a WAV file"""
+        if not self.audio_events:
+            print("No audio events recorded")
+            return None
+            
+        try:
+            # Create empty audio buffer
+            total_samples = int(duration * self.sample_rate)
+            if len(self.audio_events[0][1].shape) > 1:
+                # Stereo
+                audio_buffer = np.zeros((total_samples, 2), dtype=np.float32)
+            else:
+                # Mono
+                audio_buffer = np.zeros(total_samples, dtype=np.float32)
+            
+            # Mix all audio events
+            for game_time, sound_data in self.audio_events:
+                start_sample = int(game_time * self.sample_rate)
+                end_sample = start_sample + len(sound_data)
+                
+                if end_sample <= total_samples:
+                    if len(audio_buffer.shape) > 1 and len(sound_data.shape) == 1:
+                        # Convert mono to stereo
+                        sound_data = np.column_stack([sound_data, sound_data])
+                    elif len(audio_buffer.shape) == 1 and len(sound_data.shape) > 1:
+                        # Convert stereo to mono
+                        sound_data = np.mean(sound_data, axis=1)
+                    
+                    audio_buffer[start_sample:end_sample] += sound_data * 0.3  # Mix at lower volume
+            
+            # Normalize and convert to 16-bit
+            audio_buffer = np.clip(audio_buffer, -1.0, 1.0)
+            audio_buffer = (audio_buffer * 32767).astype(np.int16)
+            
+            # Save as WAV file
+            with wave.open(str(output_path), 'wb') as wav_file:
+                if len(audio_buffer.shape) > 1:
+                    wav_file.setnchannels(2)  # Stereo
+                    audio_data = audio_buffer.tobytes()
+                else:
+                    wav_file.setnchannels(1)  # Mono
+                    audio_data = audio_buffer.tobytes()
+                    
+                wav_file.setsampwidth(2)  # 16-bit
+                wav_file.setframerate(self.sample_rate)
+                wav_file.writeframes(audio_data)
+            
+            return output_path
+            
+        except Exception as e:
+            print(f"Error exporting audio: {e}")
+            return None
+
 class VideoBackground:
     def __init__(self, video_path, canvas_width, canvas_height):
         """Load video and prepare for looping background"""
@@ -778,7 +852,7 @@ class VideoBackground:
         
         screen.blit(current_frame, frame_rect)
 
-def main():
+def main(headless=False, export_only=False):
     cfg = load_cfg(CFG)
     # random.seed(cfg["seed"]) # Seeding is now handled by generator for scenario determinism
                                # Or, if runtime randomness is needed for non-gameplay, seed separately.
@@ -809,9 +883,18 @@ def main():
     # Assuming ARENA_WIDTH_FROM_CFG and ARENA_HEIGHT_FROM_CFG are these inner dimensions.
     arena_rect_for_particles = pygame.Rect(0, 0, ARENA_WIDTH_FROM_CFG, ARENA_HEIGHT_FROM_CFG)
 
+    # Set up headless mode if needed (must be before pygame.init())
+    if headless or export_only:
+        import os
+        os.environ['SDL_VIDEODRIVER'] = 'dummy'
+        print("Running in headless mode - no display window")
+
     pygame.init()
     pygame.font.init()
     pygame.mixer.init() # Initialize the mixer
+    
+    # Initialize audio recorder for export
+    audio_recorder = AudioRecorder() if export_only else None
     
     # Initialize the advanced AI battle director
     battle_director = PredictiveBattleDirector(target_duration_min=61, target_duration_max=70)
@@ -859,8 +942,10 @@ def main():
     camera = Camera()
     particle_emitter = ParticleEmitter()
 
+    # Set up display
     screen = pygame.display.set_mode((CANVAS_W, CANVAS_H))
-    clock  = pygame.time.Clock()
+    
+    clock = pygame.time.Clock()
     
     # Initialize video background
     # video_bg = VideoBackground("assets/backgrounds/abstract_loop_fade_2.mp4", CANVAS_W, CANVAS_H)
@@ -915,7 +1000,8 @@ def main():
         ARENA_HEIGHT_FROM_CFG, # Pass the actual arena height used for physics space
         bounce_sfx_list, # Pass the list of bounce sounds
         ORB_RADIUS_CFG, # Pass orb radius for clamping
-        BORDER_THICKNESS_CFG # Pass border thickness for clamping
+        BORDER_THICKNESS_CFG, # Pass border thickness for clamping
+        audio_recorder # Pass audio recorder for export mode
     )
 
     for orb_config_data in cfg["orbs"]:
@@ -1342,15 +1428,67 @@ def main():
             else:
                 break
 
-        pygame.display.flip()
+        # Update display only if not in headless mode
+        if not (headless or export_only):
+            pygame.display.flip()
+        
         frames.append(surface_to_array(screen).copy())
-        clock.tick(GAME_FPS)
+        
+        # Progress indicator for export mode
+        if export_only and frame_i % (GAME_FPS * 5) == 0:  # Every 5 seconds
+            progress = (current_game_time_sec / DURATION_SECONDS) * 100
+            print(f"Export progress: {progress:.1f}% ({current_game_time_sec:.1f}s/{DURATION_SECONDS}s)")
+        
+        if not export_only:
+            clock.tick(GAME_FPS)  # Skip timing in export mode for faster processing
 
     pygame.quit()
     OUT.mkdir(exist_ok=True)
+    
+    # Export video with audio if in export mode
     video_path = OUT / f"{cfg['title'].replace(' ','_')}.mp4"
-    ImageSequenceClip(frames, fps=GAME_FPS).write_videofile(
-        video_path.as_posix(), codec="libx264")
+    final_duration = current_game_time_sec
+    
+    print(f"Creating video from {len(frames)} frames...")
+    video_clip = ImageSequenceClip(frames, fps=GAME_FPS)
+    
+    if export_only and audio_recorder and audio_recorder.audio_events:
+        # Export audio and combine with video
+        print("Exporting audio...")
+        audio_path = OUT / f"{cfg['title'].replace(' ','_')}_audio.wav"
+        exported_audio_path = audio_recorder.export_audio(final_duration, audio_path)
+        
+        if exported_audio_path:
+            print("Combining video with audio...")
+            audio_clip = AudioFileClip(str(exported_audio_path))
+            
+            # Ensure audio length matches video length
+            if audio_clip.duration > video_clip.duration:
+                audio_clip = audio_clip.subclip(0, video_clip.duration)
+            elif audio_clip.duration < video_clip.duration:
+                # Pad with silence if needed
+                from moviepy.audio.AudioClip import AudioArrayClip
+                silence_duration = video_clip.duration - audio_clip.duration
+                silence = AudioArrayClip(np.zeros((int(silence_duration * audio_clip.fps), 2)), fps=audio_clip.fps)
+                audio_clip = CompositeAudioClip([audio_clip, silence.with_start(audio_clip.duration)])
+            
+            final_video = video_clip.with_audio(audio_clip)
+            final_video.write_videofile(video_path.as_posix(), codec="libx264", audio_codec="aac")
+            
+            # Clean up temporary audio file
+            if exported_audio_path.exists():
+                exported_audio_path.unlink()
+            
+            audio_clip.close()
+            final_video.close()
+        else:
+            print("No audio exported, saving video without sound...")
+            video_clip.write_videofile(video_path.as_posix(), codec="libx264")
+    else:
+        # Export video without audio
+        video_clip.write_videofile(video_path.as_posix(), codec="libx264")
+    
+    video_clip.close()
     print("Saved ->", video_path)
 
 class MainBattleContext:
@@ -1367,7 +1505,8 @@ class MainBattleContext:
                  arena_width=1080, arena_height=1920, # Added arena dimensions
                  bounce_sfx_list=None, # Added bounce_sfx_list
                  orb_radius_cfg=60,    # Added orb_radius_cfg for clamping
-                 border_thickness_cfg=6 # Added border_thickness_cfg for clamping
+                 border_thickness_cfg=6, # Added border_thickness_cfg for clamping
+                 audio_recorder=None # Added audio recorder for export mode
                 ):
         self.screen = screen
         self.space = space
@@ -1400,15 +1539,23 @@ class MainBattleContext:
         self.bounce_sfx = bounce_sfx_list # Store the list of bounce sounds
         self.orb_radius_cfg = orb_radius_cfg
         self.border_thickness_cfg = border_thickness_cfg
+        self.audio_recorder = audio_recorder
         
 
     def play_sfx(self, sfx_to_play):
         if sfx_to_play:
             sfx_to_play.play()
+            # Record audio for export if recorder is available
+            if self.audio_recorder:
+                self.audio_recorder.record_sound(sfx_to_play, self.current_game_time_sec)
 
     def play_random_bounce_sfx(self):
         if self.bounce_sfx:
-            random.choice(self.bounce_sfx).play()
+            selected_sfx = random.choice(self.bounce_sfx)
+            selected_sfx.play()
+            # Record audio for export if recorder is available
+            if self.audio_recorder:
+                self.audio_recorder.record_sound(selected_sfx, self.current_game_time_sec)
         # else:
             # print("DEBUG: No bounce SFX available to play.")
 
@@ -1619,4 +1766,27 @@ def predict_orb_future_path_point(target_orb_data, all_orbs_data, game_env_param
     return predicted_pos
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="TikTok Battle Game with Export Capabilities")
+    parser.add_argument("--headless", action="store_true", 
+                       help="Run in headless mode (no display window)")
+    parser.add_argument("--export", action="store_true",
+                       help="Export mode - generate video with audio without displaying")
+    parser.add_argument("--watch", action="store_true", 
+                       help="Watch mode - display the game while it runs (default)")
+    
+    args = parser.parse_args()
+    
+    # Default to watch mode if no specific mode is chosen
+    if not args.headless and not args.export:
+        args.watch = True
+    
+    if args.export:
+        print("🎬 Starting EXPORT mode - generating video with audio...")
+        print("⚡ Running at maximum speed without display")
+        main(headless=True, export_only=True)
+    elif args.headless:
+        print("👻 Starting HEADLESS mode - no display window")
+        main(headless=True, export_only=False)
+    else:
+        print("👀 Starting WATCH mode - displaying game window")
+        main(headless=False, export_only=False)

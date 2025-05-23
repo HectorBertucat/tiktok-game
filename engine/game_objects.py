@@ -1,6 +1,6 @@
 # engine/game_objects.py
 from dataclasses import dataclass, field
-import random, pygame, pymunk, math
+import random, pygame, pymunk, math, time
 
 MAX_ORB_VELOCITY = 2500 # pixels/second, massively increased for faster action (from 1500)
 HP_ANIMATION_DURATION = 0.3 # seconds for the HP change animation
