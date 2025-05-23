@@ -2,24 +2,28 @@
 import pygame, numpy as np, random
 from engine.game_objects import HP_ANIMATION_DURATION # Import the constant
 
-# Health bar colors
-COLOR_HP_HIGH = (8, 188, 19)  # Green #08BC13 (HP 6-7)
-COLOR_HP_MID = (215, 214, 10) # Yellow #D7D60A (HP 3-5)
-COLOR_HP_LOW = (231, 65, 8)   # Red #E74108 (HP 1-2)
-COLOR_HP_EMPTY = (60, 60, 60) # Background for empty segments
-COLOR_HP_BORDER = (0, 0, 0)   # Black border for segments
-COLOR_TEXT = (240, 240, 240) # White-ish for text
+# Enhanced neon health bar colors
+COLOR_HP_HIGH = (0, 255, 100)      # Bright neon green (HP 6-7)
+COLOR_HP_HIGH_GLOW = (0, 255, 100, 120)  # Green glow
+COLOR_HP_MID = (255, 200, 0)       # Bright neon yellow (HP 3-5)  
+COLOR_HP_MID_GLOW = (255, 200, 0, 120)   # Yellow glow
+COLOR_HP_LOW = (255, 50, 50)       # Bright neon red (HP 1-2)
+COLOR_HP_LOW_GLOW = (255, 50, 50, 120)   # Red glow
+COLOR_HP_EMPTY = (30, 30, 40)      # Dark background for empty segments
+COLOR_HP_BORDER = (100, 255, 255)  # Cyan neon border
+COLOR_TEXT = (255, 255, 255)       # Pure white for text
+COLOR_TEXT_GLOW = (255, 255, 255, 100)  # White glow for text
 
 # HP Bar Style Constants
-HP_BAR_PADDING_HORIZONTAL = 20  # Padding from screen edges for the HP bar itself
-HP_BAR_PADDING_VERTICAL_TOP = 30 # Padding from screen top for the first name
-HP_BAR_SPACING_BETWEEN = 25     # Vertical space between Orb1's HP bar and Orb2's Name
-HP_BAR_HEIGHT_PER_ORB = 30      # Height of the HP bar segments
-HP_SEGMENT_GAP = 4              # Gap between segments
-HP_SEGMENT_BORDER_RADIUS = 7    # Rounded corners for segments
-HP_NAME_FONT_SIZE = 52          # Much larger font for orb names
-HP_NAME_BOTTOM_MARGIN = 8       # Space between name and its HP bar
-HP_SEGMENT_SHAKE_INTENSITY = 4  # Max pixels for HP segment shake
+HP_BAR_PADDING_HORIZONTAL = 30  # Increased padding for better spacing
+HP_BAR_PADDING_VERTICAL_TOP = 40 # Increased padding from screen top
+HP_BAR_SPACING_BETWEEN = 35     # More space between HP bars
+HP_BAR_HEIGHT_PER_ORB = 40      # Increased height for more impressive bars
+HP_SEGMENT_GAP = 6              # Increased gap between segments
+HP_SEGMENT_BORDER_RADIUS = 12   # More rounded corners for modern look
+HP_NAME_FONT_SIZE = 64          # Even larger font for orb names
+HP_NAME_BOTTOM_MARGIN = 12      # More space between name and HP bar
+HP_SEGMENT_SHAKE_INTENSITY = 6  # Increased shake for more drama
 
 # renderer.py  — nouvelle fonction
 def draw_top_hp_bar(screen, orb, index, total_orbs=2):
@@ -28,26 +32,32 @@ def draw_top_hp_bar(screen, orb, index, total_orbs=2):
 
     screen_w = screen.get_width()
     
-    # Determine HP color based on current HP
+    # Determine HP color and glow based on current HP
     if orb.hp >= 6:
         current_hp_color = COLOR_HP_HIGH
-        highlight_hp_color = (min(255, COLOR_HP_HIGH[0]+35), min(255, COLOR_HP_HIGH[1]+35), min(255, COLOR_HP_HIGH[2]+35))
+        current_glow_color = COLOR_HP_HIGH_GLOW
+        highlight_hp_color = (255, 255, 255)  # Pure white highlight for neon effect
     elif orb.hp >= 3:
         current_hp_color = COLOR_HP_MID
-        highlight_hp_color = (min(255, COLOR_HP_MID[0]+35), min(255, COLOR_HP_MID[1]+35), min(255, COLOR_HP_MID[2]+35))
+        current_glow_color = COLOR_HP_MID_GLOW
+        highlight_hp_color = (255, 255, 255)  # Pure white highlight for neon effect
     else: 
         current_hp_color = COLOR_HP_LOW
-        highlight_hp_color = (min(255, COLOR_HP_LOW[0]+35), min(255, COLOR_HP_LOW[1]+35), min(255, COLOR_HP_LOW[2]+35))
+        current_glow_color = COLOR_HP_LOW_GLOW
+        highlight_hp_color = (255, 255, 255)  # Pure white highlight for neon effect
 
-    # Orb Name Display (first, to determine its height)
-    font = pygame.font.SysFont(None, HP_NAME_FONT_SIZE)
+    # Enhanced Orb Name Display with glow effect
+    font = pygame.font.SysFont(None, HP_NAME_FONT_SIZE, bold=True)  # Make it bold
     name_text_color = orb.outline_color if orb.outline_color else COLOR_TEXT
+    
+    # Create multiple name surfaces for glow effect
     name_surface = font.render(orb.name, True, name_text_color)
-    name_rect = name_surface.get_rect() # Get rect to find its height
+    name_glow_surface = font.render(orb.name, True, COLOR_TEXT_GLOW[:3])  # Remove alpha for direct render
+    
+    name_rect = name_surface.get_rect()
     name_height = name_rect.height
 
     # Calculate Y positions
-    # Height of one full display unit (Name + Margin + HP Bar)
     single_orb_display_total_height = name_height + HP_NAME_BOTTOM_MARGIN + HP_BAR_HEIGHT_PER_ORB
     
     name_y_position = HP_BAR_PADDING_VERTICAL_TOP + index * (single_orb_display_total_height + HP_BAR_SPACING_BETWEEN)
@@ -56,6 +66,20 @@ def draw_top_hp_bar(screen, orb, index, total_orbs=2):
     # Center the name horizontally
     name_rect.centerx = screen_w // 2
     name_rect.top = name_y_position
+    
+    # Draw name with glow effect (multiple offset copies for glow)
+    glow_offsets = [(-2, -2), (-2, 2), (2, -2), (2, 2), (-1, 0), (1, 0), (0, -1), (0, 1)]
+    for offset_x, offset_y in glow_offsets:
+        glow_rect = name_rect.copy()
+        glow_rect.x += offset_x
+        glow_rect.y += offset_y
+        # Create a glow surface with alpha
+        glow_surf = pygame.Surface(name_glow_surface.get_size(), pygame.SRCALPHA)
+        glow_surf.blit(name_glow_surface, (0, 0))
+        glow_surf.set_alpha(60)  # Semi-transparent glow
+        screen.blit(glow_surf, glow_rect)
+    
+    # Draw main name on top
     screen.blit(name_surface, name_rect)
 
     # HP Bar Segments (below the name)
@@ -130,7 +154,19 @@ def draw_top_hp_bar(screen, orb, index, total_orbs=2):
                                   segment_y_base + current_segment_shake_y, 
                                   segment_width, HP_BAR_HEIGHT_PER_ORB)
         
-        pygame.draw.rect(screen, COLOR_HP_BORDER, segment_rect, border_radius=HP_SEGMENT_BORDER_RADIUS)
+        # Draw enhanced neon border with glow effect
+        # Outer glow
+        glow_rect = pygame.Rect(segment_rect.x - 2, segment_rect.y - 2, 
+                               segment_rect.width + 4, segment_rect.height + 4)
+        glow_surface = pygame.Surface((glow_rect.width, glow_rect.height), pygame.SRCALPHA)
+        pygame.draw.rect(glow_surface, (*COLOR_HP_BORDER, 60), 
+                        (0, 0, glow_rect.width, glow_rect.height), 
+                        border_radius=HP_SEGMENT_BORDER_RADIUS + 2)
+        screen.blit(glow_surface, glow_rect)
+        
+        # Main border
+        pygame.draw.rect(screen, COLOR_HP_BORDER, segment_rect, 
+                        width=3, border_radius=HP_SEGMENT_BORDER_RADIUS)
         
         inner_fill_rect_base = pygame.Rect(segment_rect.left + 1, segment_rect.top + 1, 
                                           segment_rect.width - 2, segment_rect.height - 2)
@@ -170,23 +206,52 @@ def draw_top_hp_bar(screen, orb, index, total_orbs=2):
                 final_segment_color = COLOR_HP_EMPTY
                 apply_highlight = False
         
-        # Draw the segment fill (potentially wiped)
+        # Draw the segment fill with enhanced neon glow
         if segment_width_for_wipe > 0:
             animated_segment_fill_rect = pygame.Rect(inner_fill_rect_base.left, inner_fill_rect_base.top, 
                                                      segment_width_for_wipe, inner_fill_rect_base.height)
+            
+            # Draw inner glow for the segment
+            if final_segment_color != COLOR_HP_EMPTY:
+                # Create glow effect inside the segment
+                inner_glow_rect = pygame.Rect(animated_segment_fill_rect.x - 1, 
+                                            animated_segment_fill_rect.y - 1,
+                                            animated_segment_fill_rect.width + 2, 
+                                            animated_segment_fill_rect.height + 2)
+                inner_glow_surface = pygame.Surface((inner_glow_rect.width, inner_glow_rect.height), pygame.SRCALPHA)
+                pygame.draw.rect(inner_glow_surface, (*final_segment_color, 100), 
+                               (0, 0, inner_glow_rect.width, inner_glow_rect.height), 
+                               border_radius=inner_border_radius + 1)
+                screen.blit(inner_glow_surface, inner_glow_rect)
+            
+            # Draw main segment fill
             pygame.draw.rect(screen, final_segment_color, animated_segment_fill_rect, border_radius=inner_border_radius)
 
+            # Enhanced highlight with neon effect
             if apply_highlight and final_highlight_color and segment_width_for_wipe > 0:
-                highlight_rect_height = max(1, animated_segment_fill_rect.height // 3)
+                highlight_rect_height = max(1, animated_segment_fill_rect.height // 2)  # Bigger highlight
                 actual_highlight_rect = pygame.Rect(animated_segment_fill_rect.left, 
                                                     animated_segment_fill_rect.top, 
                                                     animated_segment_fill_rect.width, 
                                                     highlight_rect_height)
-                pygame.draw.rect(screen, final_highlight_color, actual_highlight_rect, 
-                                 border_top_left_radius=inner_border_radius, 
-                                 border_top_right_radius=inner_border_radius)
-        elif final_segment_color == COLOR_HP_EMPTY and not segment_is_part_of_animation : # Explicitly draw empty if it should be empty and not animating
-             pygame.draw.rect(screen, COLOR_HP_EMPTY, inner_fill_rect_base, border_radius=inner_border_radius)
+                
+                # Create highlight with gradient effect
+                highlight_surface = pygame.Surface((actual_highlight_rect.width, actual_highlight_rect.height), pygame.SRCALPHA)
+                pygame.draw.rect(highlight_surface, (*final_highlight_color, 180), 
+                               (0, 0, actual_highlight_rect.width, actual_highlight_rect.height),
+                               border_top_left_radius=inner_border_radius, 
+                               border_top_right_radius=inner_border_radius)
+                screen.blit(highlight_surface, actual_highlight_rect)
+                
+        elif final_segment_color == COLOR_HP_EMPTY and not segment_is_part_of_animation:
+            # Draw empty segment with subtle inner shadow
+            pygame.draw.rect(screen, COLOR_HP_EMPTY, inner_fill_rect_base, border_radius=inner_border_radius)
+            # Add inner shadow for depth
+            shadow_surface = pygame.Surface((inner_fill_rect_base.width, inner_fill_rect_base.height), pygame.SRCALPHA)
+            pygame.draw.rect(shadow_surface, (0, 0, 0, 40), 
+                           (0, 0, inner_fill_rect_base.width, inner_fill_rect_base.height), 
+                           border_radius=inner_border_radius)
+            screen.blit(shadow_surface, inner_fill_rect_base)
 
 def surface_to_array(surf):
     '''Pygame Surface -> RGB numpy array (H, W, 3)'''

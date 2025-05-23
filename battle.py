@@ -1241,9 +1241,38 @@ def main():
                 game_state["border_flash_until_time"] = 0 
         # else: color remains original color (or whatever it was last set to)
 
-        # Draw video background
-        # video_bg.draw(screen)
-        screen.fill((50, 70, 90))
+        # Enhanced cyberpunk background
+        # Create gradient background for neon aesthetic
+        background_surface = pygame.Surface((CANVAS_W, CANVAS_H))
+        
+        # Create a dark gradient from top to bottom
+        for y in range(CANVAS_H):
+            # Dark blue to purple gradient
+            progress = y / CANVAS_H
+            r = int(20 + progress * 40)   # 20 to 60
+            g = int(25 + progress * 35)   # 25 to 60  
+            b = int(80 + progress * 60)   # 80 to 140
+            color = (r, g, b)
+            pygame.draw.line(background_surface, color, (0, y), (CANVAS_W, y))
+        
+        # Add subtle grid pattern for cyberpunk effect
+        import time
+        grid_alpha = int(20 + 10 * abs(math.sin(time.time() * 0.5)))  # Pulsing grid
+        grid_color = (0, 150, 200, grid_alpha)
+        
+        # Vertical grid lines
+        for x in range(0, CANVAS_W, 80):
+            grid_surface = pygame.Surface((2, CANVAS_H), pygame.SRCALPHA)
+            grid_surface.fill(grid_color)
+            background_surface.blit(grid_surface, (x, 0))
+        
+        # Horizontal grid lines  
+        for y in range(0, CANVAS_H, 80):
+            grid_surface = pygame.Surface((CANVAS_W, 2), pygame.SRCALPHA)
+            grid_surface.fill(grid_color)
+            background_surface.blit(grid_surface, (0, y))
+        
+        screen.blit(background_surface, (0, 0))
 
         # Draw HP bars at the top
         for i, orb in enumerate(battle_context.orbs):
@@ -1255,11 +1284,34 @@ def main():
         arena_render_offset_x = ARENA_X0 + camera.offset.x 
         arena_render_offset_y = ARENA_Y0 + camera.offset.y
 
-        pygame.draw.rect(
-            screen, game_state["border_current_color"], 
-            (arena_render_offset_x, arena_render_offset_y, 
-             ARENA_WIDTH_FROM_CFG, ARENA_HEIGHT_FROM_CFG), # Use ARENA_WIDTH_FROM_CFG
-            width=BORDER_THICKNESS_CFG)
+        # Enhanced arena border with neon glow effects
+        border_rect = pygame.Rect(arena_render_offset_x, arena_render_offset_y, 
+                                 ARENA_WIDTH_FROM_CFG, ARENA_HEIGHT_FROM_CFG)
+        border_color = game_state["border_current_color"]
+        
+        # Create multiple glow layers for neon effect
+        glow_layers = [
+            (BORDER_THICKNESS_CFG + 20, (*border_color, 30)),   # Outermost glow
+            (BORDER_THICKNESS_CFG + 12, (*border_color, 60)),   # Middle glow  
+            (BORDER_THICKNESS_CFG + 6, (*border_color, 100)),   # Inner glow
+        ]
+        
+        # Draw glow layers
+        for thickness, glow_color in glow_layers:
+            glow_surface = pygame.Surface((border_rect.width + thickness*2, border_rect.height + thickness*2), pygame.SRCALPHA)
+            glow_rect_surface = pygame.Rect(thickness, thickness, border_rect.width, border_rect.height)
+            pygame.draw.rect(glow_surface, glow_color, glow_rect_surface, width=thickness)
+            screen.blit(glow_surface, (border_rect.x - thickness, border_rect.y - thickness))
+        
+        # Draw main border with enhanced width
+        pygame.draw.rect(screen, border_color, border_rect, width=BORDER_THICKNESS_CFG)
+        
+        # Add inner border for depth
+        inner_border_rect = pygame.Rect(border_rect.x + BORDER_THICKNESS_CFG//2, 
+                                       border_rect.y + BORDER_THICKNESS_CFG//2,
+                                       border_rect.width - BORDER_THICKNESS_CFG, 
+                                       border_rect.height - BORDER_THICKNESS_CFG)
+        pygame.draw.rect(screen, (*border_color, 150), inner_border_rect, width=2)
 
         # Draw particles: their positions are in arena space.
         # We pass the total offset of the arena on the screen (ARENA_X0/Y0 + camera_shake)

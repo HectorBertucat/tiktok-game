@@ -61,22 +61,70 @@ class Orb:
         x = self.body.position.x + offset[0]
         y = self.body.position.y + offset[1]
 
-        # Draw shield effect first if active, so it's behind the orb
+        # Create neon glow effect with multiple layers
+        base_radius = int(self.shape.radius)
+        
+        # Outer glow layers (largest to smallest)
+        glow_layers = [
+            (base_radius + 40, (*self.outline_color, 15)),   # Outermost glow
+            (base_radius + 25, (*self.outline_color, 30)),   # Middle glow
+            (base_radius + 15, (*self.outline_color, 50)),   # Inner glow
+        ]
+        
+        # Draw glow layers
+        for glow_radius, glow_color in glow_layers:
+            glow_surface = pygame.Surface((glow_radius * 2, glow_radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surface, glow_color, (glow_radius, glow_radius), glow_radius)
+            screen.blit(glow_surface, (int(x - glow_radius), int(y - glow_radius)))
+
+        # Draw shield with enhanced neon effect if active
         if self.is_shielded:
-            shield_color_outline = (0, 0, 255)  # Blue outline
-            shield_color_fill = (100, 100, 255, 77) # Lighter blue fill, 77/255 opacity (~30%)
-            # Make shield visually larger
-            shield_radius = int(self.shape.radius + 28) # Increased from +6 to +12
-
-            # Create a temporary surface for alpha blending the shield fill
-            shield_surface = pygame.Surface((shield_radius * 2, shield_radius * 2), pygame.SRCALPHA)
-            pygame.draw.circle(shield_surface, shield_color_fill, (shield_radius, shield_radius), shield_radius)
-            screen.blit(shield_surface, (int(x - shield_radius), int(y - shield_radius)))
+            shield_base_radius = base_radius + 35
             
-        # Draw outline next
-        outline_radius = self.shape.radius + 5 # Slightly larger for outline
-        pygame.draw.circle(screen, self.outline_color, (int(x), int(y)), int(outline_radius), width=5)
+            # Shield glow layers
+            shield_glow_layers = [
+                (shield_base_radius + 20, (0, 255, 255, 25)),    # Cyan outer glow
+                (shield_base_radius + 10, (0, 200, 255, 50)),    # Cyan middle glow
+                (shield_base_radius + 5, (100, 150, 255, 80)),   # Blue inner glow
+            ]
+            
+            for shield_radius, shield_color in shield_glow_layers:
+                shield_surface = pygame.Surface((shield_radius * 2, shield_radius * 2), pygame.SRCALPHA)
+                pygame.draw.circle(shield_surface, shield_color, (shield_radius, shield_radius), shield_radius)
+                screen.blit(shield_surface, (int(x - shield_radius), int(y - shield_radius)))
+            
+            # Shield border with pulsing effect
+            import time
+            pulse = abs(math.sin(time.time() * 4)) * 0.3 + 0.7  # Pulse between 0.7 and 1.0
+            shield_border_color = (int(0 * pulse), int(255 * pulse), int(255 * pulse))
+            pygame.draw.circle(screen, shield_border_color, (int(x), int(y)), shield_base_radius, width=4)
+            
+        # Draw main orb outline with enhanced neon effect
+        outline_radius = base_radius + 8
+        
+        # Multiple outline layers for neon effect
+        outline_layers = [
+            (outline_radius + 3, (*self.outline_color, 180)),  # Outer outline
+            (outline_radius, (*self.outline_color, 255)),      # Main outline
+        ]
+        
+        for out_radius, out_color in outline_layers:
+            # Create surface for alpha blending
+            outline_surface = pygame.Surface((out_radius * 2, out_radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(outline_surface, out_color, (out_radius, out_radius), out_radius, width=6)
+            screen.blit(outline_surface, (int(x - out_radius), int(y - out_radius)))
 
+        # Add inner shadow/depth to the orb
+        inner_shadow_surface = pygame.Surface((base_radius * 2, base_radius * 2), pygame.SRCALPHA)
+        pygame.draw.circle(inner_shadow_surface, (0, 0, 0, 30), (base_radius, base_radius), base_radius - 5)
+        screen.blit(inner_shadow_surface, (int(x - base_radius), int(y - base_radius)))
+
+        # Draw logo with subtle glow
+        logo_glow_surface = pygame.Surface((base_radius * 2, base_radius * 2), pygame.SRCALPHA)
+        # Add a subtle white glow behind the logo
+        pygame.draw.circle(logo_glow_surface, (255, 255, 255, 40), (base_radius, base_radius), base_radius - 10)
+        screen.blit(logo_glow_surface, (int(x - base_radius), int(y - base_radius)))
+        
         # Draw logo on top of everything
         rect = self.logo_surface.get_rect(center=(x, y))
         screen.blit(self.logo_surface, rect)
@@ -180,8 +228,44 @@ class Pickup:
             return
         
         x, y = self.body.position
-        rect = self.sprite.get_rect(center=(x + offset[0], y + offset[1]))
+        center_x, center_y = x + offset[0], y + offset[1]
+        
+        # Enhanced neon glow effects for pickups based on type
+        import time
+        pulse = abs(math.sin(time.time() * 3)) * 0.4 + 0.6  # Pulse between 0.6 and 1.0
+        
+        # Define glow colors based on pickup type
+        glow_colors = {
+            'heart': (255, 100, 100),    # Red glow for hearts
+            'shield': (100, 200, 255),   # Blue glow for shields 
+            'saw': (255, 200, 0),        # Yellow glow for saws
+            'bomb': (255, 150, 0),       # Orange glow for bombs
+            'blade': (200, 100, 255),    # Purple glow for blades
+            'ice': (150, 255, 255),      # Cyan glow for ice
+            'fire': (255, 80, 0)         # Red-orange glow for fire
+        }
+        
+        base_glow_color = glow_colors.get(self.kind, (255, 255, 255))  # Default white
+        
+        # Multi-layered glow effect
+        radius = self.shape.radius
+        for i in range(4):
+            glow_radius = radius + (25 - i * 5)
+            alpha = int((80 - i * 15) * pulse)
+            glow_surface = pygame.Surface((glow_radius * 2, glow_radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surface, (*base_glow_color, alpha), 
+                             (glow_radius, glow_radius), glow_radius)
+            screen.blit(glow_surface, (int(center_x - glow_radius), int(center_y - glow_radius)), 
+                      special_flags=pygame.BLEND_ALPHA_SDL2)
+        
+        # Draw main sprite
+        rect = self.sprite.get_rect(center=(center_x, center_y))
         screen.blit(self.sprite, rect)
+        
+        # Add highlight ring
+        highlight_color = tuple(min(255, c + 100) for c in base_glow_color)
+        pygame.draw.circle(screen, highlight_color, (int(center_x), int(center_y)), 
+                         int(radius + 5), 3)
 
     def destroy(self, space):
         self.alive = False
@@ -240,10 +324,36 @@ class Saw:
         if not self.alive or not self.owner or self.owner.hp <= 0:
             return
         
-        # Current sprite drawing
         x, y = self.body.position
-        rect = self.sprite.get_rect(center=(x + offset[0], y + offset[1]))
+        center_x, center_y = x + offset[0], y + offset[1]
+        
+        # Enhanced neon glow effect for spinning saw
+        import time
+        spin_glow = abs(math.sin(self.angle * 0.1)) * 0.3 + 0.7  # Spin-based glow
+        
+        # Saw glow colors (dangerous orange-red)
+        saw_glow_color = (255, 100, 0)  # Orange-red
+        
+        # Multi-layered spinning glow
+        radius = self.shape.radius
+        for i in range(5):
+            glow_radius = radius + (30 - i * 6)
+            alpha = int((100 - i * 15) * spin_glow)
+            glow_surface = pygame.Surface((glow_radius * 2, glow_radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surface, (*saw_glow_color, alpha), 
+                             (glow_radius, glow_radius), glow_radius)
+            screen.blit(glow_surface, (int(center_x - glow_radius), int(center_y - glow_radius)), 
+                      special_flags=pygame.BLEND_ALPHA_SDL2)
+        
+        # Draw main sprite
+        rect = self.sprite.get_rect(center=(center_x, center_y))
         screen.blit(self.sprite, rect)
+        
+        # Add spinning highlight effects
+        highlight_intensity = abs(math.sin(self.angle * 0.05)) * 100 + 155
+        highlight_color = (255, int(highlight_intensity), 0)
+        pygame.draw.circle(screen, highlight_color, (int(center_x), int(center_y)), 
+                         int(radius + 8), 4)
 
     def destroy(self): # Removed space argument, use self.space
         if not self.alive: return # Already destroyed

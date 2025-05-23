@@ -102,9 +102,17 @@ class ParticleEmitter:
              orb_radius_ratio: float = 1.0 
              ):
         
-        actual_fade_color = fade_to_color if fade_to_color else (int(base_particle_color[0]*0.3), int(base_particle_color[1]*0.3), int(base_particle_color[2]*0.3))
+        # Enhanced neon particle colors
+        if fade_to_color is None:
+            # Create more vibrant fade colors for neon effect
+            fade_to_color = (int(base_particle_color[0]*0.6), int(base_particle_color[1]*0.6), int(base_particle_color[2]*0.6))
+        
+        actual_fade_color = fade_to_color
         if len(actual_fade_color) == 4: 
              actual_fade_color = (actual_fade_color[0], actual_fade_color[1], actual_fade_color[2])
+        
+        # Enhance base particle color for neon effect
+        enhanced_base_color = tuple(min(255, int(c * 1.3)) for c in base_particle_color)
 
         # Scale particle properties by orb size
         effective_scaled_max_radius = base_max_radius * orb_radius_ratio
@@ -127,7 +135,7 @@ class ParticleEmitter:
             # Vary particle sizes more for a splashy look
             particle_initial_radius = max(1, effective_scaled_max_radius * random.uniform(0.3, 1.0))
             
-            particle = Particle(position, velocity, particle_lifespan, particle_initial_radius, base_particle_color, actual_fade_color)
+            particle = Particle(position, velocity, particle_lifespan, particle_initial_radius, enhanced_base_color, actual_fade_color)
             particle.bounces_remaining = self.default_particle_bounces 
             self.particles.append(particle)
 
