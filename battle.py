@@ -1502,11 +1502,31 @@ def main(headless=False, export_only=False):
             if orb_to_draw.hp > 0:
                 orb_to_draw.draw(screen, offset=(arena_render_offset_x, arena_render_offset_y))
 
-        if winner:
-            if frame_i - win_frame < 2 * GAME_FPS:
-                giant = pygame.transform.smoothscale(
-                    winner.logo_surface, (300, 300))
-                rect = giant.get_rect(center=(CANVAS_W//2, CANVAS_H//2))
+        # Enhanced victory animation
+        if winner or game_state.get("victory_triggered", False):
+            if not winner and game_state.get("victory_triggered", False):
+                # Set winner from victory trigger
+                winner = game_state.get("victory_orb")
+                win_frame = frame_i
+            
+            if frame_i - win_frame < 4 * GAME_FPS:  # Extended victory duration
+                # Scale animation over time
+                progress = (frame_i - win_frame) / (4 * GAME_FPS)
+                
+                # Animated scaling and position
+                base_size = 200 + int(100 * abs(math.sin(current_game_time_sec * 3)))  # Pulsing effect
+                giant = pygame.transform.smoothscale(winner.logo_surface, (base_size, base_size))
+                
+                # Position below the "GAGNE LE COMBAT" text
+                rect = giant.get_rect(center=(CANVAS_W//2, CANVAS_H//2 + 100))
+                
+                # Add glow effect around winner orb
+                glow_surface = pygame.Surface((base_size + 100, base_size + 100), pygame.SRCALPHA)
+                glow_color = (*winner.outline_color, int(100 * abs(math.sin(current_game_time_sec * 4))))
+                pygame.draw.circle(glow_surface, glow_color, 
+                                 (base_size//2 + 50, base_size//2 + 50), base_size//2 + 50)
+                screen.blit(glow_surface, (rect.x - 50, rect.y - 50), special_flags=pygame.BLEND_ADD)
+                
                 screen.blit(giant, rect)
             else:
                 break
@@ -1731,6 +1751,8 @@ class MainBattleContext:
 
         if position_key == "center":
             rect.center = (CANVAS_W // 2, CANVAS_H // 2)
+        elif position_key == "center_top":
+            rect.center = (CANVAS_W // 2, CANVAS_H // 4)  # Upper quarter of screen
         elif position_key == "top_center":
             rect.center = (CANVAS_W // 2, SAFE_TOP + 50) 
         elif position_key == "bottom_center":
@@ -1756,6 +1778,37 @@ class MainBattleContext:
         self.game_state["border_current_color"] = self.game_state["border_flash_color_config"]
         self.game_state["border_flash_until_time"] = self.current_game_time_sec + self.game_state["border_flash_duration_config"]
         print(f"BOMB EFFECT: Border flash triggered until {self.game_state['border_flash_until_time']:.2f}s")
+
+    def trigger_victory(self, winning_orb):
+        """Trigger victory sequence with enhanced effects"""
+        print(f"🏆 VICTORY TRIGGERED for {winning_orb.name}!")
+        
+        # Add victory state to game state
+        self.game_state["victory_triggered"] = True
+        self.game_state["victory_orb"] = winning_orb
+        self.game_state["victory_time"] = self.current_game_time_sec
+        
+        # Clear all pickups and saws from arena
+        for pickup in self.pickups[:]:  # Copy list to avoid modification during iteration
+            pickup.destroy(self.space)
+        self.pickups.clear()
+        
+        # Remove all saws
+        import engine.physics as phys
+        for saw in phys.active_saws[:]:
+            saw.destroy()
+        phys.active_saws.clear()
+        
+        # Add victory text overlay
+        victory_text_payload = {
+            "text": "GAGNE LE COMBAT",
+            "duration": 5.0,
+            "position": "center_top",
+            "font_size": 100,
+            "color": winning_orb.outline_color,
+            "event_time": self.current_game_time_sec
+        }
+        self.handle_text_overlay_event(victory_text_payload)
 
 # Helper function for predictive spawning
 def predict_orb_future_path_point(target_orb_data, all_orbs_data, game_env_params, duration_to_predict, num_steps):

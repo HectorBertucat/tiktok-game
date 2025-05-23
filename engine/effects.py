@@ -190,10 +190,79 @@ class Shockwave:
                 surface.blit(pulse_surface, (render_center_x - pulse_radius - 10, render_center_y - pulse_radius - 10), 
                            special_flags=pygame.BLEND_ADD)
 
+@dataclass
+class LaserGrid:
+    position: pygame.math.Vector2
+    radius: float
+    max_radius: float
+    lifespan: float
+    max_lifespan: float
+    color: tuple[int, int, int]
+
+    def __init__(self, position, max_radius, lifespan, color):
+        self.position = pygame.math.Vector2(position)
+        self.radius = 0
+        self.max_radius = max_radius
+        self.lifespan = lifespan
+        self.max_lifespan = lifespan
+        self.color = color
+
+    def update(self, dt):
+        if self.lifespan <= 0:
+            return
+        
+        self.lifespan -= dt
+        life_ratio = max(0, self.lifespan / self.max_lifespan)
+        
+        # Radius grows quickly then fades
+        self.radius = self.max_radius * (1 - life_ratio)
+
+    def draw(self, surface, total_arena_offset_on_screen: pygame.math.Vector2):
+        if self.lifespan > 0 and self.radius > 0:
+            render_center_x = self.position.x + total_arena_offset_on_screen.x
+            render_center_y = self.position.y + total_arena_offset_on_screen.y
+            
+            life_ratio = max(0, self.lifespan / self.max_lifespan)
+            
+            # Only show grid lines, no filled circles
+            grid_size = 80  # Match the arena grid size
+            base_alpha = int(255 * life_ratio)
+            
+            # Find grid center
+            center_grid_x = int((render_center_x) // grid_size) * grid_size
+            center_grid_y = int((render_center_y) // grid_size) * grid_size
+            
+            # Draw laser grid lines within radius
+            for grid_offset in range(-5, 6):
+                # Vertical laser lines
+                grid_x = center_grid_x + (grid_offset * grid_size)
+                if abs(grid_x - render_center_x) < self.radius:
+                    intensity = 1.0 - (abs(grid_x - render_center_x) / self.radius)
+                    line_alpha = int(base_alpha * intensity * 0.8)
+                    if line_alpha > 0:
+                        line_color = (*self.color, line_alpha)
+                        line_surface = pygame.Surface((6, self.radius * 2), pygame.SRCALPHA)
+                        line_surface.fill(line_color)
+                        surface.blit(line_surface, (grid_x - 3, render_center_y - self.radius), 
+                                   special_flags=pygame.BLEND_ADD)
+                
+                # Horizontal laser lines
+                grid_y = center_grid_y + (grid_offset * grid_size)
+                if abs(grid_y - render_center_y) < self.radius:
+                    intensity = 1.0 - (abs(grid_y - render_center_y) / self.radius)
+                    line_alpha = int(base_alpha * intensity * 0.8)
+                    if line_alpha > 0:
+                        line_color = (*self.color, line_alpha)
+                        line_surface = pygame.Surface((self.radius * 2, 6), pygame.SRCALPHA)
+                        line_surface.fill(line_color)
+                        surface.blit(line_surface, (render_center_x - self.radius, grid_y - 3), 
+                                   special_flags=pygame.BLEND_ADD)
+
 class ParticleEmitter:
     def __init__(self):
         self.particles: list[Particle] = []
         self.shockwaves: list[Shockwave] = []
+        self.laser_grids: list[LaserGrid] = []
         # Define default physics properties for particles, can be overridden in emit or globally changed
         self.gravity = pygame.math.Vector2(0, 250) # Pixels/sec^2, positive Y is down
         self.drag = 0.98 # Factor per second for velocity reduction (e.g., 0.98 means 2% reduction per sec)
@@ -250,6 +319,11 @@ class ParticleEmitter:
         """Emit a shockwave effect at the given position"""
         shockwave = Shockwave(position, max_radius, lifespan, color, thickness)
         self.shockwaves.append(shockwave)
+    
+    def emit_laser_grid(self, position, max_radius=150, lifespan=0.6, color=(255, 255, 255)):
+        """Emit a laser grid effect that only shows on grid lines"""
+        laser_grid = LaserGrid(position, max_radius, lifespan, color)
+        self.laser_grids.append(laser_grid)
 
     def update(self, dt, arena_rect: pygame.Rect):
         self.particles = [p for p in self.particles if p.lifespan > 0]
@@ -260,6 +334,11 @@ class ParticleEmitter:
         self.shockwaves = [s for s in self.shockwaves if s.lifespan > 0]
         for shockwave in self.shockwaves:
             shockwave.update(dt)
+        
+        # Update laser grids
+        self.laser_grids = [lg for lg in self.laser_grids if lg.lifespan > 0]
+        for laser_grid in self.laser_grids:
+            laser_grid.update(dt)
 
     def draw(self, surface, total_arena_offset_on_screen: pygame.math.Vector2):
         for particle in self.particles:
@@ -267,4 +346,8 @@ class ParticleEmitter:
         
         # Draw shockwaves
         for shockwave in self.shockwaves:
-            shockwave.draw(surface, total_arena_offset_on_screen) 
+            shockwave.draw(surface, total_arena_offset_on_screen)
+        
+        # Draw laser grids
+        for laser_grid in self.laser_grids:
+            laser_grid.draw(surface, total_arena_offset_on_screen) 

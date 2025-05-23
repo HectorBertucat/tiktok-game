@@ -174,6 +174,15 @@ def register_saw_hits(space, battle_context, dmg=1):
         
         was_shielded_at_impact = orb_hit_by_saw.is_shielded
 
+        # Get contact point for shockwave positioning
+        contact_point = orb_hit_by_saw.body.position  # Default fallback
+        contact_points = arbiter.contact_point_set.points
+        if contact_points:
+            contact_point = contact_points[0].point_a
+
+        # Check if this will be a killing hit
+        will_be_killing_hit = (not was_shielded_at_impact and orb_hit_by_saw.hp <= dmg)
+
         # Process the actual hit and shield interaction
         print(f"DEBUG: {orb_hit_by_saw.name} taking {dmg} damage from saw")
         orb_hit_by_saw.take_hit(dmg) # This might change orb_hit_by_saw.is_shielded
@@ -182,27 +191,54 @@ def register_saw_hits(space, battle_context, dmg=1):
         if was_shielded_at_impact:
             particle_base_color = (173, 216, 230)  # Light Blue
             particle_fade_color = (70, 130, 180)   # Steel Blue
-            # Blue shockwave for shield break
+            # Blue shockwave for shield break at contact point
             if battle_context.particle_emitter:
                 battle_context.particle_emitter.emit_shockwave(
-                    orb_hit_by_saw.body.position, 
+                    contact_point, 
                     max_radius=250, 
                     lifespan=1.0, 
                     color=(100, 150, 255),  # Blue
                     thickness=8
                 )
+                # Add laser grid effect
+                battle_context.particle_emitter.emit_laser_grid(
+                    contact_point,
+                    max_radius=300,
+                    lifespan=0.6,
+                    color=(150, 200, 255)
+                )
             # Shield loss sound is now handled by the take_hit method callback
         else:
             particle_base_color = (255, 20, 20)    # Bright Red
             particle_fade_color = (100, 0, 0)      # Darker Red
-            # Red shockwave for blade hit
+            # Red shockwave for blade hit at contact point
             if battle_context.particle_emitter:
-                battle_context.particle_emitter.emit_shockwave(
-                    orb_hit_by_saw.body.position, 
-                    max_radius=200, 
-                    lifespan=0.8, 
-                    color=(255, 50, 50),  # Red
-                    thickness=6
+                if will_be_killing_hit:
+                    # Massive shockwave for killing hit
+                    battle_context.particle_emitter.emit_shockwave(
+                        contact_point, 
+                        max_radius=400, 
+                        lifespan=1.5, 
+                        color=(255, 0, 0),  # Bright Red
+                        thickness=12
+                    )
+                    # Trigger winning sequence
+                    battle_context.trigger_victory(saw.owner)
+                else:
+                    # Normal hit shockwave
+                    battle_context.particle_emitter.emit_shockwave(
+                        contact_point, 
+                        max_radius=200, 
+                        lifespan=0.8, 
+                        color=(255, 50, 50),  # Red
+                        thickness=6
+                    )
+                # Add laser grid effect for all hits
+                battle_context.particle_emitter.emit_laser_grid(
+                    contact_point,
+                    max_radius=250,
+                    lifespan=0.5,
+                    color=(255, 100, 100)
                 )
             battle_context.play_sfx(battle_context.hit_blade_sfx) # Play normal hit sound only if no shield took the hit
 
