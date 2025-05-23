@@ -30,6 +30,7 @@ class Orb:
     
     # AI Director callback for health change tracking
     health_change_callback: callable = field(init=False, default=None)
+    shield_loss_callback: callable = field(init=False, default=None)
 
     def __post_init__(self):
         self.hp = self.max_hp
@@ -135,6 +136,9 @@ class Orb:
         if self.is_shielded:
             self.is_shielded = False
             print(f"{self.name} shield blocked a hit!")
+            # Call shield loss callback if available
+            if self.shield_loss_callback:
+                self.shield_loss_callback()
             # Here, you could also trigger a specific "shield block" animation if desired
             # For now, no HP change means no HP animation
             return

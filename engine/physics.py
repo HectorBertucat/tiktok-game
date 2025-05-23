@@ -178,8 +178,7 @@ def register_saw_hits(space, battle_context, dmg=1):
         if was_shielded_at_impact:
             particle_base_color = (173, 216, 230)  # Light Blue
             particle_fade_color = (70, 130, 180)   # Steel Blue
-            # Optionally, play a specific shield hit sound here if available
-            # e.g., battle_context.play_sfx(battle_context.shield_block_sfx)
+            # Shield loss sound is now handled by the take_hit method callback
         else:
             particle_base_color = (255, 20, 20)    # Bright Red
             particle_fade_color = (100, 0, 0)      # Darker Red

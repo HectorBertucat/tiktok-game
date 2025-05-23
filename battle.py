@@ -986,6 +986,9 @@ def main(headless=False, export_only=False):
         shield_pickup_sfx = pygame.mixer.Sound("assets/sfx/shield.wav")
         shield_pickup_sfx.set_volume(0.5)  # Moderate volume for pickups
         
+        shield_loss_sfx = pygame.mixer.Sound("assets/sfx/shield_loss.wav")
+        shield_loss_sfx.set_volume(0.6)  # Moderate volume for shield loss
+        
         blade_get_power_up_sfx = pygame.mixer.Sound("assets/sfx/blade_get_power_up.wav")
         blade_get_power_up_sfx.set_volume(0.6)  # Power-up sounds should be noticeable
     except pygame.error as e:
@@ -998,6 +1001,7 @@ def main(headless=False, export_only=False):
         bomb1_sfx = None
         bomb_sfx = None
         shield_pickup_sfx = None
+        shield_loss_sfx = None
         blade_get_power_up_sfx = None
 
     # Load bounce SFX with reduced volume
@@ -1071,6 +1075,7 @@ def main(headless=False, export_only=False):
         # slow_mo_start_sfx, slow_mo_end_sfx, # Removed
         health_boost_sfx, hit_normal_sfx, hit_blade_sfx,
         bomb1_sfx, bomb_sfx, shield_pickup_sfx, 
+        shield_loss_sfx,
         blade_get_power_up_sfx, # ADDED
         camera, particle_emitter,
         PICKUP_RADIUS_CFG, 
@@ -1104,6 +1109,9 @@ def main(headless=False, export_only=False):
         
         # Set up AI Director health change callback
         orb.health_change_callback = battle_director.track_health_change
+        
+        # Set up shield loss callback to play sound effect
+        orb.shield_loss_callback = lambda: battle_context.play_sfx(battle_context.shield_loss_sfx)
         
         orbs.append(orb)
 
@@ -1600,6 +1608,7 @@ class MainBattleContext:
                  game_state_dict, orbs_list,
                  health_boost_sfx=None, hit_normal_sfx=None, hit_blade_sfx=None,
                  bomb1_sfx=None, bomb_sfx=None, shield_pickup_sfx=None, # Added new SFX params
+                 shield_loss_sfx=None,
                  blade_get_power_up_sfx=None, # ADDED
                  camera_instance=None, particle_emitter_instance=None,
                  pickup_radius=20, # Added pickup_radius
@@ -1630,6 +1639,7 @@ class MainBattleContext:
         self.bomb1_sfx = bomb1_sfx
         self.bomb_sfx = bomb_sfx
         self.shield_pickup_sfx = shield_pickup_sfx
+        self.shield_loss_sfx = shield_loss_sfx
         self.blade_get_power_up_sfx = blade_get_power_up_sfx # ADDED
         # Visuals & Effects
         self.camera = camera_instance
