@@ -863,7 +863,7 @@ def main():
     clock  = pygame.time.Clock()
     
     # Initialize video background
-    video_bg = VideoBackground("assets/backgrounds/abstract_loop_fade.mp4", CANVAS_W, CANVAS_H)
+    # video_bg = VideoBackground("assets/backgrounds/abstract_loop_fade_2.mp4", CANVAS_W, CANVAS_H)
     
     saw_token_img = pygame.image.load("assets/pickups/saw_token.png").convert_alpha()
     heart_token_img = pygame.image.load("assets/pickups/heart_token.png").convert_alpha()
@@ -974,7 +974,7 @@ def main():
         
         # Update video background
         dt = 1.0 / GAME_FPS
-        video_bg.update(dt)
+        # video_bg.update(dt)
 
         # --- Update physics and game objects ---
         # dt = 1.0 / GAME_FPS * game_state["game_speed_factor"] # Old dt with game_speed_factor
@@ -1242,7 +1242,8 @@ def main():
         # else: color remains original color (or whatever it was last set to)
 
         # Draw video background
-        video_bg.draw(screen)
+        # video_bg.draw(screen)
+        screen.fill((50, 70, 90))
 
         # Draw HP bars at the top
         for i, orb in enumerate(battle_context.orbs):
