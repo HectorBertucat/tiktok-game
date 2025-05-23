@@ -27,6 +27,9 @@ class Orb:
     hp_at_animation_start: int = field(init=False, default=0)
     hp_target_for_animation: int = field(init=False, default=0)
     # is_gaining_hp_animation: bool = field(init=False, default=False) # Can be inferred from hp_target vs hp_at_start
+    
+    # AI Director callback for health change tracking
+    health_change_callback: callable = field(init=False, default=None)
 
     def __post_init__(self):
         self.hp = self.max_hp
@@ -102,6 +105,11 @@ class Orb:
             self.hp_animation_timer = HP_ANIMATION_DURATION
             # self.is_gaining_hp_animation = False # Redundant, target < start implies loss
             print(f"DEBUG: {self.name} took hit. HP: {old_hp_for_animation} -> {new_hp}. Anim timer: {self.hp_animation_timer}")
+            
+            # Notify AI Director of health change
+            if self.health_change_callback:
+                import time
+                self.health_change_callback(self.name, old_hp_for_animation, new_hp, time.time(), "damage")
 
     def heal(self, amount=1): # Default heal amount to 1 as per recent changes
         if self.hp >= self.max_hp: # Already full, no heal or animation
@@ -117,6 +125,11 @@ class Orb:
             self.hp_animation_timer = HP_ANIMATION_DURATION
             # self.is_gaining_hp_animation = True # Redundant, target > start implies gain
             print(f"DEBUG: {self.name} healed. HP: {old_hp_for_animation} -> {new_hp}. Anim timer: {self.hp_animation_timer}")
+            
+            # Notify AI Director of health change
+            if self.health_change_callback:
+                import time
+                self.health_change_callback(self.name, old_hp_for_animation, new_hp, time.time(), "heal")
         # The old heal_effect_active and heal_effect_timer are removed
         # The new HP bar animation will serve as the visual feedback.
 

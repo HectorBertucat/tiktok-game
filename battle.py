@@ -1,6 +1,6 @@
 # battle.py – tout en haut
 import pygame, random, math
-from moviepy import VideoFileClip
+from moviepy import VideoFileClip, ImageSequenceClip
 from pathlib import Path
 from ruamel.yaml import YAML
 import numpy as np
@@ -63,6 +63,335 @@ PRED_MAX_ORB_VELOCITY = 1500 # Must match MAX_ORB_VELOCITY in engine.game_object
 def load_cfg(path):
     yaml = YAML(typ="safe")
     return yaml.load(path.read_text())
+
+class PredictiveBattleDirector:
+    """Advanced AI system for creating engaging, scripted-looking battles that finish in 61-70 seconds"""
+    
+    def __init__(self, target_duration_min=61, target_duration_max=70):
+        self.target_duration_min = target_duration_min
+        self.target_duration_max = target_duration_max
+        self.target_duration = (target_duration_min + target_duration_max) / 2  # 65.5s average
+        
+        # Battle narrative tracking
+        self.last_major_event_time = 0
+        self.health_change_history = []  # Track recent health changes to avoid repetition
+        self.interaction_density = []    # Track interaction frequency over time
+        self.orb_aggression_scores = {}  # Track how aggressive each orb has been
+        
+        # Predictive parameters
+        self.prediction_horizon = 8.0   # Predict up to 8 seconds ahead
+        self.analysis_interval = 2.0    # Re-analyze every 2 seconds
+        self.last_analysis_time = 0
+        
+        # Battle pacing configuration
+        self.early_game_phase = 25      # 0-25s: Setup phase, moderate action
+        self.mid_game_phase = 45        # 25-45s: Peak action phase
+        self.end_game_phase = 65        # 45-65s: Climax phase, decisive action
+        
+        # Strategic spawning weights based on game phase and situation
+        self.phase_weights = {
+            'early': {'heart': 12, 'saw': 15, 'shield': 8, 'bomb': 1},
+            'mid': {'heart': 8, 'saw': 25, 'shield': 4, 'bomb': 3},
+            'end': {'heart': 5, 'saw': 30, 'shield': 2, 'bomb': 8}
+        }
+    
+    def analyze_battle_state(self, current_time, orbs, battle_context):
+        """Analyze current battle state and predict optimal item placements"""
+        
+        # Determine current game phase
+        phase = self.get_game_phase(current_time)
+        
+        # Analyze orb states
+        orb_analysis = self.analyze_orb_states(orbs, current_time)
+        
+        # Predict future interactions
+        interaction_predictions = self.predict_future_interactions(orbs, battle_context, 5.0)
+        
+        # Calculate time pressure (how close we are to target end time)
+        time_pressure = self.calculate_time_pressure(current_time, orb_analysis)
+        
+        # Generate strategic spawning plan
+        spawning_plan = self.generate_spawning_strategy(
+            phase, orb_analysis, interaction_predictions, time_pressure, current_time
+        )
+        
+        return spawning_plan
+    
+    def get_game_phase(self, current_time):
+        """Determine which phase of the battle we're in"""
+        if current_time < self.early_game_phase:
+            return 'early'
+        elif current_time < self.mid_game_phase:
+            return 'mid'
+        else:
+            return 'end'
+    
+    def analyze_orb_states(self, orbs, current_time):
+        """Analyze current orb health, positioning, and aggression levels"""
+        analysis = {
+            'total_health': sum(orb.hp for orb in orbs),
+            'health_disparity': max(orb.hp for orb in orbs) - min(orb.hp for orb in orbs),
+            'low_health_orbs': [orb for orb in orbs if orb.hp <= 2],
+            'dominant_orb': max(orbs, key=lambda o: o.hp) if orbs else None,
+            'weakest_orb': min(orbs, key=lambda o: o.hp) if orbs else None,
+            'average_health': sum(orb.hp for orb in orbs) / len(orbs) if orbs else 0
+        }
+        
+        # Update aggression scores based on recent activity
+        for orb in orbs:
+            if orb.name not in self.orb_aggression_scores:
+                self.orb_aggression_scores[orb.name] = 0
+            
+            # Increase aggression score if orb has saws or recently picked up offensive items
+            if hasattr(orb, 'has_saw') and orb.has_saw:
+                self.orb_aggression_scores[orb.name] += 0.1
+        
+        analysis['aggression_scores'] = self.orb_aggression_scores.copy()
+        return analysis
+    
+    def predict_future_interactions(self, orbs, battle_context, prediction_time):
+        """Predict where and when orbs will interact in the near future"""
+        predictions = []
+        
+        if len(orbs) < 2:
+            return predictions
+        
+        # Use existing prediction system to forecast orb positions
+        game_env_params = {
+            "arena_width": battle_context.arena_width,
+            "arena_height": battle_context.arena_height, 
+            "border_thickness": battle_context.border_thickness_cfg,
+            "space_damping": 0.99,
+            "max_velocity": 1500,
+            "physics_substeps": 3
+        }
+        
+        # Sample multiple time points to predict interaction opportunities
+        time_samples = [1.0, 2.0, 3.5, 5.0]
+        
+        for t in time_samples:
+            orb_positions = []
+            for orb in orbs:
+                target_data = {
+                    "name": orb.name,
+                    "pos": orb.body.position,
+                    "vel": orb.body.velocity,
+                    "radius": orb.shape.radius,
+                    "id": id(orb)
+                }
+                other_orbs_data = [
+                    {
+                        "name": other.name,
+                        "pos": other.body.position,
+                        "vel": other.body.velocity, 
+                        "radius": other.shape.radius,
+                        "id": id(other)
+                    }
+                    for other in orbs if other != orb
+                ]
+                
+                predicted_pos = predict_orb_future_path_point(
+                    target_data, other_orbs_data, game_env_params, 
+                    t, int(t * 60)  # 60 FPS
+                )
+                orb_positions.append((orb, predicted_pos))
+            
+            # Check for predicted close encounters
+            for i, (orb1, pos1) in enumerate(orb_positions):
+                for orb2, pos2 in orb_positions[i+1:]:
+                    distance = (pos1 - pos2).length
+                    if distance < (orb1.shape.radius + orb2.shape.radius) * 3:  # Close encounter threshold
+                        interaction_point = (pos1 + pos2) / 2
+                        predictions.append({
+                            'time': t,
+                            'orbs': [orb1.name, orb2.name],
+                            'position': interaction_point,
+                            'distance': distance,
+                            'interaction_strength': max(0, 1.0 - distance / 200)
+                        })
+        
+        return predictions
+    
+    def calculate_time_pressure(self, current_time, orb_analysis):
+        """Calculate how much pressure to apply to end the battle on time"""
+        time_remaining = self.target_duration - current_time
+        
+        # If we're past target time, high pressure to end quickly
+        if time_remaining <= 0:
+            return 1.0
+        
+        # Calculate pressure based on health disparity and time remaining
+        health_factor = 1.0 - (orb_analysis['average_health'] / 7.0)  # Assume max HP is ~7
+        time_factor = 1.0 - (time_remaining / self.target_duration)
+        
+        # Combine factors: more pressure as time runs out or health gets low
+        pressure = (health_factor * 0.6 + time_factor * 0.4)
+        
+        # Special case: if one orb is very weak and time is running out, high pressure
+        if orb_analysis['health_disparity'] >= 3 and time_remaining < 15:
+            pressure = max(pressure, 0.8)
+        
+        return min(1.0, pressure)
+    
+    def generate_spawning_strategy(self, phase, orb_analysis, interactions, time_pressure, current_time):
+        """Generate strategic item spawning plan based on analysis"""
+        strategy = {
+            'immediate_spawns': [],
+            'scheduled_spawns': [],
+            'weights_override': None
+        }
+        
+        # Get base weights for current phase
+        base_weights = self.phase_weights[phase].copy()
+        
+        # Adjust weights based on battle state
+        weights = self.adjust_weights_for_situation(
+            base_weights, orb_analysis, time_pressure, current_time
+        )
+        
+        # Generate immediate spawns for critical situations
+        immediate_spawns = self.generate_immediate_spawns(
+            orb_analysis, interactions, time_pressure
+        )
+        
+        # Generate scheduled spawns based on predicted interactions
+        scheduled_spawns = self.generate_scheduled_spawns(
+            interactions, orb_analysis, current_time
+        )
+        
+        strategy['immediate_spawns'] = immediate_spawns
+        strategy['scheduled_spawns'] = scheduled_spawns
+        strategy['weights_override'] = weights
+        
+        return strategy
+    
+    def adjust_weights_for_situation(self, base_weights, orb_analysis, time_pressure, current_time):
+        """Adjust spawning weights based on current battle situation"""
+        weights = base_weights.copy()
+        
+        # High time pressure: favor bombs and saws to end the battle
+        if time_pressure > 0.7:
+            weights['bomb'] *= 3
+            weights['saw'] *= 2
+            weights['heart'] *= 0.3
+            weights['shield'] *= 0.2
+        
+        # Large health disparity: help the weaker orb or pressure the stronger one
+        elif orb_analysis['health_disparity'] >= 3:
+            if len(orb_analysis['low_health_orbs']) > 0:
+                # Give the weak orb a chance
+                weights['heart'] *= 2
+                weights['shield'] *= 2
+                weights['saw'] *= 0.7
+            else:
+                # Pressure the dominant orb
+                weights['saw'] *= 1.5
+                weights['bomb'] *= 2
+        
+        # Very low total health: be more conservative
+        elif orb_analysis['total_health'] <= 4:
+            weights['heart'] *= 1.5
+            weights['bomb'] *= 0.5
+        
+        # High aggression phase: increase offensive items
+        max_aggression = max(orb_analysis['aggression_scores'].values()) if orb_analysis['aggression_scores'] else 0
+        if max_aggression > 2.0:
+            weights['saw'] *= 1.3
+            weights['shield'] *= 1.2
+        
+        return weights
+    
+    def generate_immediate_spawns(self, orb_analysis, interactions, time_pressure):
+        """Generate items that should be spawned immediately"""
+        immediate = []
+        
+        # Emergency heart for critically low orb (but avoid repetitive healing)
+        critical_orbs = [orb for orb in orb_analysis['low_health_orbs'] if orb.hp == 1]
+        if critical_orbs and time_pressure < 0.8:  # Don't help if we need to end soon
+            orb = critical_orbs[0]
+            # Check if this would create a repetitive pattern
+            if not self.should_avoid_repetitive_pattern(orb.name, +1, self.last_analysis_time):
+                immediate.append({
+                    'type': 'heart',
+                    'target_orb': orb.name,
+                    'urgency': 'critical',
+                    'reason': 'emergency_healing'
+                })
+        
+        # Decisive bomb if battle needs to end
+        if time_pressure > 0.9 and orb_analysis['health_disparity'] <= 1:
+            # Battle is too close, force a decision
+            immediate.append({
+                'type': 'bomb',
+                'target_orb': orb_analysis['dominant_orb'].name if orb_analysis['dominant_orb'] else None,
+                'urgency': 'decisive',
+                'reason': 'force_conclusion'
+            })
+        
+        return immediate
+    
+    def generate_scheduled_spawns(self, interactions, orb_analysis, current_time):
+        """Generate items scheduled for future interactions"""
+        scheduled = []
+        
+        # Schedule items at predicted interaction points
+        for interaction in interactions:
+            if interaction['interaction_strength'] > 0.6:  # High-likelihood interaction
+                spawn_time = current_time + interaction['time'] - 0.5  # Spawn 0.5s before interaction
+                
+                # Choose item type based on interaction context
+                if interaction['time'] < 3.0:  # Near-term interaction
+                    item_type = 'saw'  # Offensive for immediate impact
+                else:  # Longer-term interaction
+                    item_type = random.choice(['saw', 'shield'])  # Mix offensive and defensive
+                
+                scheduled.append({
+                    'spawn_time': spawn_time,
+                    'type': item_type,
+                    'position': interaction['position'],
+                    'target_interaction': interaction,
+                    'reason': 'predicted_encounter'
+                })
+        
+        return scheduled
+    
+    def track_health_change(self, orb_name, old_hp, new_hp, current_time, reason):
+        """Track health changes to avoid repetitive patterns"""
+        change = {
+            'orb': orb_name,
+            'old_hp': old_hp,
+            'new_hp': new_hp,
+            'change': new_hp - old_hp,
+            'time': current_time,
+            'reason': reason
+        }
+        
+        self.health_change_history.append(change)
+        
+        # Keep only recent history (last 20 seconds)
+        cutoff_time = current_time - 20.0
+        self.health_change_history = [h for h in self.health_change_history if h['time'] > cutoff_time]
+        
+        return change
+    
+    def should_avoid_repetitive_pattern(self, orb_name, proposed_change, current_time):
+        """Check if we should avoid a repetitive health change pattern"""
+        recent_changes = [h for h in self.health_change_history 
+                         if h['orb'] == orb_name and h['time'] > current_time - 10.0]
+        
+        if len(recent_changes) < 2:
+            return False
+        
+        # Check for ping-pong pattern (damage -> heal -> damage -> heal)
+        if len(recent_changes) >= 3:
+            last_three = recent_changes[-3:]
+            signs = [1 if h['change'] > 0 else -1 for h in last_three]
+            if signs == [1, -1, 1] or signs == [-1, 1, -1]:
+                # Ping-pong pattern detected, avoid if proposed change continues it
+                if (signs[-1] == 1 and proposed_change < 0) or (signs[-1] == -1 and proposed_change > 0):
+                    return True
+        
+        return False
 
 class VideoBackground:
     def __init__(self, video_path, canvas_width, canvas_height):
@@ -205,6 +534,9 @@ def main():
     pygame.init()
     pygame.font.init()
     pygame.mixer.init() # Initialize the mixer
+    
+    # Initialize the advanced AI battle director
+    battle_director = PredictiveBattleDirector(target_duration_min=61, target_duration_max=70)
 
     # Load SFX
     try:
@@ -328,6 +660,9 @@ def main():
         orb.body.position = initial_pos
         orb.body.velocity = initial_vel
         
+        # Set up AI Director health change callback
+        orb.health_change_callback = battle_director.track_health_change
+        
         orbs.append(orb)
 
     register_orb_collisions(space, battle_context)  # Pass context
@@ -394,6 +729,36 @@ def main():
                 if p in pickups:
                     pickups.remove(p)
 
+        # --- Advanced AI Battle Director Integration ---
+        # Let the AI director analyze the battle and provide strategic spawning guidance
+        ai_strategy = None
+        if current_game_time_sec >= battle_director.last_analysis_time + battle_director.analysis_interval:
+            ai_strategy = battle_director.analyze_battle_state(current_game_time_sec, orbs, battle_context)
+            battle_director.last_analysis_time = current_game_time_sec
+            
+            # Process immediate spawns from AI director
+            for spawn_plan in ai_strategy['immediate_spawns']:
+                if len(pickups) < MAX_PICKUPS_ON_SCREEN:
+                    # Find the target orb
+                    target_orb = None
+                    if spawn_plan.get('target_orb'):
+                        target_orb = next((o for o in orbs if o.name == spawn_plan['target_orb']), None)
+                    
+                    if not target_orb:
+                        target_orb = random.choice([o for o in orbs if o.hp > 0] or orbs)
+                    
+                    # Use existing spawning logic but override the item type
+                    battle_context.handle_spawn_pickup_event({
+                        "kind": spawn_plan['type'],
+                        "x": None,  # Let it use predictive positioning
+                        "y": None,
+                        "_ai_spawn": True,
+                        "_ai_reason": spawn_plan['reason']
+                    })
+                    print(f"🤖 AI Director: {spawn_plan['reason']} -> spawning {spawn_plan['type']}")
+            
+            print(f"🎯 AI Phase: {battle_director.get_game_phase(current_game_time_sec)}, Time Pressure: {battle_director.calculate_time_pressure(current_game_time_sec, battle_director.analyze_orb_states(orbs, current_game_time_sec)):.2f}")
+        
         # --- Unified Dynamic Pickup Spawning Logic Integration ---
         num_current_pickups = len(pickups)
         if current_game_time_sec >= last_unified_pickup_spawn_attempt_time + UNIFIED_SPAWN_INTERVAL_SECONDS:
@@ -442,11 +807,18 @@ def main():
                                     print(f"ASSISTANCE (Unified): Orb '{target_orb_for_spawn.name}' low HP & no shield. Queuing SHIELD.")
                                     break # Assistance found
                 
-                # If no specific assistance was triggered, proceed with normal weighted random spawning for the default_target_orb
+                # If no specific assistance was triggered, proceed with weighted random spawning
                 if not chosen_kind_for_spawn:
                     target_orb_for_spawn = default_target_orb # Ensure we use the initially chosen random orb
-                    available_kinds = list(PICKUP_KINDS_WEIGHTS.keys())
-                    kind_weights = [PICKUP_KINDS_WEIGHTS[k] for k in available_kinds]
+                    
+                    # Use AI strategy weights if available, otherwise use default weights
+                    weights_to_use = PICKUP_KINDS_WEIGHTS
+                    if ai_strategy and ai_strategy.get('weights_override'):
+                        weights_to_use = ai_strategy['weights_override']
+                        print(f"🤖 AI using strategic weights: {weights_to_use}")
+                    
+                    available_kinds = list(weights_to_use.keys())
+                    kind_weights = [weights_to_use[k] for k in available_kinds]
                     if available_kinds: # Should always be true with current weights
                         chosen_kind_list = random.choices(available_kinds, weights=kind_weights, k=1)
                         chosen_kind_for_spawn = chosen_kind_list[0]
@@ -658,6 +1030,7 @@ class MainBattleContext:
         self.bounce_sfx = bounce_sfx_list # Store the list of bounce sounds
         self.orb_radius_cfg = orb_radius_cfg
         self.border_thickness_cfg = border_thickness_cfg
+        
 
     def play_sfx(self, sfx_to_play):
         if sfx_to_play:

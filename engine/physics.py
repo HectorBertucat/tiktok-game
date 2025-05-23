@@ -341,8 +341,33 @@ def register_orb_wall_collisions(space, battle_context):
     def begin_orb_wall(arbiter, _space, _data):
         # arbiter.shapes[0] is Orb (type 1)
         # arbiter.shapes[1] is Wall (type WALL_COLLISION_TYPE)
-        # We don't need to check orb_ref on the wall, only that it's a wall.
-        # The handler setup (1, WALL_COLLISION_TYPE) ensures this.
+        orb_shape = arbiter.shapes[0]
+        wall_shape = arbiter.shapes[1]
+        
+        # Get collision point and normal
+        contact_points = arbiter.contact_point_set.points
+        if contact_points:
+            collision_point = contact_points[0].point_a
+            collision_normal = arbiter.normal
+            
+            # Simple camera shake for wall impacts
+            if hasattr(battle_context, 'camera'):
+                battle_context.camera.shake(intensity=3, duration=0.1)
+            
+            # Simple wall collision particles - much lighter than before
+            if battle_context.particle_emitter and arbiter.is_first_contact:
+                battle_context.particle_emitter.emit(
+                    num_particles=3,
+                    position=collision_point,
+                    base_particle_color=(255, 255, 255),
+                    fade_to_color=(100, 100, 100),
+                    base_velocity_scale=40,
+                    lifespan_s=0.3,
+                    base_max_radius=4,
+                    impact_normal=pygame.math.Vector2(collision_normal.x, collision_normal.y),
+                    impact_strength=1.0,
+                    orb_radius_ratio=1.0
+                )
         
         # Play bounce sound for orb vs wall
         if hasattr(battle_context, 'play_random_bounce_sfx'):
