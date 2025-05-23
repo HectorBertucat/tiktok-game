@@ -395,18 +395,18 @@ def register_orb_wall_collisions(space, battle_context):
                     current_angle = math.atan2(current_velocity.y, current_velocity.x)
                     
                     # Add random deviation (10% of pi radians = ~18 degrees max deviation)
-                    max_deviation = math.pi * 0.1  # 10% of 180 degrees
+                    max_deviation = math.pi * 0.25  # 10% of 180 degrees
                     random_deviation = random.uniform(-max_deviation, max_deviation)
                     new_angle = current_angle + random_deviation
                     
                     # Apply the randomized velocity after normal collision response
-                    def apply_randomized_velocity():
+                    def apply_randomized_velocity(space, key, data):
                         new_velocity_x = velocity_magnitude * math.cos(new_angle)
                         new_velocity_y = velocity_magnitude * math.sin(new_angle)
                         orb.body.velocity = (new_velocity_x, new_velocity_y)
                     
                     # Schedule the velocity change for after the collision is processed
-                    _space.add_post_step_callback(lambda space, key, data: apply_randomized_velocity(), 
+                    _space.add_post_step_callback(apply_randomized_velocity, 
                                                 f"randomize_velocity_{id(orb)}", None)
             
             # Simple wall collision particles - much lighter than before
