@@ -1053,8 +1053,84 @@ def main(headless=False, export_only=False):
         "border_current_color": BORDER_COLOR_CFG, # Start with original color
         "border_flash_until_time": 0.0,
         "border_flash_color_config": BORDER_FLASH_COLOR_CFG, # Store the configured flash color
-        "border_flash_duration_config": DEFAULT_FLASH_DURATION_CFG # Store the configured flash duration
+        "border_flash_duration_config": DEFAULT_FLASH_DURATION_CFG, # Store the configured flash duration
+        # Arena shrinking
+        "arena_original_width": ARENA_WIDTH_FROM_CFG,
+        "arena_original_height": ARENA_HEIGHT_FROM_CFG,
+        "arena_current_width": ARENA_WIDTH_FROM_CFG,
+        "arena_current_height": ARENA_HEIGHT_FROM_CFG,
+        "arena_offset_x": 0.0,  # Offset to center the shrinking arena
+        "arena_offset_y": 0.0,  # Offset to center the shrinking arena
+        "arena_min_size_ratio": 0.6,  # Minimum 60% of original size
+        "last_arena_update": 0.0
     }
+
+    def update_arena_size(current_time, total_duration):
+        """Update arena size - linear shrinking over time to 60% minimum"""
+        if current_time <= 0:
+            return
+        
+        # Calculate shrinking progress (0 to 1 over total duration)
+        progress = min(current_time / total_duration, 1.0)
+        
+        # Linear interpolation from 100% to 60% size
+        size_ratio = 1.0 - (progress * (1.0 - game_state["arena_min_size_ratio"]))
+        
+        # Calculate new arena dimensions
+        new_width = game_state["arena_original_width"] * size_ratio
+        new_height = game_state["arena_original_height"] * size_ratio
+        
+        # Calculate offsets to center the arena (half the reduction on each side)
+        width_reduction = game_state["arena_original_width"] - new_width
+        height_reduction = game_state["arena_original_height"] - new_height
+        offset_x = width_reduction / 2.0
+        offset_y = height_reduction / 2.0
+        
+        # Update game state
+        game_state["arena_current_width"] = new_width
+        game_state["arena_current_height"] = new_height
+        game_state["arena_offset_x"] = offset_x
+        game_state["arena_offset_y"] = offset_y
+        
+        # Update arena rect for particles (with offset)
+        arena_rect_for_particles.x = offset_x
+        arena_rect_for_particles.y = offset_y
+        arena_rect_for_particles.width = new_width
+        arena_rect_for_particles.height = new_height
+        
+        # Recreate space with new dimensions every 2 seconds to avoid too frequent updates
+        if current_time - game_state["last_arena_update"] >= 2.0:
+            game_state["last_arena_update"] = current_time
+            
+            # Remove old walls
+            shapes_to_remove = [shape for shape in space.shapes if hasattr(shape, 'collision_type') and shape.collision_type == phys.WALL_COLLISION_TYPE]
+            for shape in shapes_to_remove:
+                space.remove(shape)
+            
+            # Add new walls with updated size and offset for centering
+            w, h = new_width, new_height
+            half_b = BORDER_THICKNESS_CFG / 2.0
+            
+            # Add offset to center the arena
+            p1 = (offset_x + half_b, offset_y + half_b)
+            p2 = (offset_x + w - half_b, offset_y + half_b)
+            p3 = (offset_x + w - half_b, offset_y + h - half_b)
+            p4 = (offset_x + half_b, offset_y + h - half_b)
+            
+            static_segments = [
+                pymunk.Segment(space.static_body, p1, p2, radius=half_b),  # Top
+                pymunk.Segment(space.static_body, p2, p3, radius=half_b),  # Right
+                pymunk.Segment(space.static_body, p3, p4, radius=half_b),  # Bottom
+                pymunk.Segment(space.static_body, p4, p1, radius=half_b)   # Left
+            ]
+            
+            for s in static_segments:
+                s.elasticity = 1.5  # Extra bouncy walls
+                s.friction = 0.5
+                s.collision_type = phys.WALL_COLLISION_TYPE
+                space.add(s)
+            
+            print(f"Arena updated: {new_width:.0f}x{new_height:.0f} ({size_ratio*100:.1f}% of original)")
 
     orbs = []
     pickups = [] # Initialize pickups list here
@@ -1145,6 +1221,9 @@ def main(headless=False, export_only=False):
         
         # Custom background animation timing
         dt = 1.0 / GAME_FPS
+        
+        # Update arena size (shrinking over time)
+        update_arena_size(current_game_time_sec, DURATION_SECONDS)
 
         # --- Update physics and game objects ---
         # dt = 1.0 / GAME_FPS * game_state["game_speed_factor"] # Old dt with game_speed_factor
@@ -1453,9 +1532,15 @@ def main(headless=False, export_only=False):
         arena_render_offset_x = ARENA_X0 + camera.offset.x 
         arena_render_offset_y = ARENA_Y0 + camera.offset.y
 
-        # Enhanced arena border with neon glow effects
-        border_rect = pygame.Rect(arena_render_offset_x, arena_render_offset_y, 
-                                 ARENA_WIDTH_FROM_CFG, ARENA_HEIGHT_FROM_CFG)
+        # Enhanced arena border with neon glow effects using current arena size and offset
+        current_arena_width = game_state["arena_current_width"]
+        current_arena_height = game_state["arena_current_height"]
+        arena_offset_x = game_state["arena_offset_x"]
+        arena_offset_y = game_state["arena_offset_y"]
+        
+        border_rect = pygame.Rect(arena_render_offset_x + arena_offset_x, 
+                                 arena_render_offset_y + arena_offset_y, 
+                                 current_arena_width, current_arena_height)
         border_color = game_state["border_current_color"]
         
         # Create multiple glow layers for neon effect
@@ -1692,26 +1777,31 @@ class MainBattleContext:
         x = payload.get("x")
         y = payload.get("y")
 
-        # Determine position
+        # Determine position using current arena dimensions and offset (for shrinking arena)
         if x is not None and y is not None:
             # Handle normalized (0-1) or absolute coordinates from payload
-            # ARENA_W and ARENA_H here should ideally be the actual arena dimensions used.
-            # Using self.arena_width and self.arena_height stored in context
-            current_arena_w = self.arena_width 
-            current_arena_h = self.arena_height
+            # Use current arena dimensions and offset from game state
+            current_arena_w = self.game_state.get("arena_current_width", self.arena_width)
+            current_arena_h = self.game_state.get("arena_current_height", self.arena_height)
+            arena_offset_x = self.game_state.get("arena_offset_x", 0.0)
+            arena_offset_y = self.game_state.get("arena_offset_y", 0.0)
 
             pos_x = x * current_arena_w if 0 <= x <= 1 else x
             pos_y = y * current_arena_h if 0 <= y <= 1 else y
-            # Clamp to be within arena, away from edges for pickup radius
-            pos_x = max(self.pickup_radius, min(pos_x, current_arena_w - self.pickup_radius))
-            pos_y = max(self.pickup_radius, min(pos_y, current_arena_h - self.pickup_radius))
+            # Add offset and clamp to be within arena, away from edges for pickup radius
+            pos_x = arena_offset_x + max(self.pickup_radius, min(pos_x, current_arena_w - self.pickup_radius))
+            pos_y = arena_offset_y + max(self.pickup_radius, min(pos_y, current_arena_h - self.pickup_radius))
             pickup_pos = (pos_x, pos_y)
         else: # Random position if x or y is missing
-            current_arena_w = self.arena_width
-            current_arena_h = self.arena_height
+            # Use current arena dimensions and offset from game state
+            current_arena_w = self.game_state.get("arena_current_width", self.arena_width)
+            current_arena_h = self.game_state.get("arena_current_height", self.arena_height)
+            arena_offset_x = self.game_state.get("arena_offset_x", 0.0)
+            arena_offset_y = self.game_state.get("arena_offset_y", 0.0)
+            
             rand_x = random.uniform(self.pickup_radius, current_arena_w - self.pickup_radius)
             rand_y = random.uniform(self.pickup_radius, current_arena_h - self.pickup_radius)
-            pickup_pos = (rand_x, rand_y)
+            pickup_pos = (arena_offset_x + rand_x, arena_offset_y + rand_y)
 
         img_surface = None
         if kind == "saw": img_surface = self.saw_token_img

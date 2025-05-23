@@ -28,6 +28,17 @@ class Orb:
     hp_target_for_animation: int = field(init=False, default=0)
     # is_gaining_hp_animation: bool = field(init=False, default=False) # Can be inferred from hp_target vs hp_at_start
     
+    # Size Animation State
+    base_radius: float = field(init=False, default=0.0)  # Original radius before size changes
+    current_radius: float = field(init=False, default=0.0)  # Current animated radius
+    target_radius: float = field(init=False, default=0.0)  # Target radius for animation
+    size_animation_timer: float = field(init=False, default=0.0)
+    size_animation_duration: float = field(init=False, default=0.5)  # 0.5 second animation
+    
+    # Image scaling
+    original_logo_surface: pygame.Surface = field(init=False, default=None)  # Original unscaled logo
+    scaled_logo_surface: pygame.Surface = field(init=False, default=None)   # Currently scaled logo
+    
     # AI Director callback for health change tracking
     health_change_callback: callable = field(init=False, default=None)
     shield_loss_callback: callable = field(init=False, default=None)
@@ -37,6 +48,7 @@ class Orb:
         self.previous_hp = self.max_hp # Initialize previous_hp
         self.hp_at_animation_start = self.max_hp
         self.hp_target_for_animation = self.max_hp
+        # Size animation will be initialized when attach_shape is called
 
     def update(self, dt):
         # Update HP animation timer
@@ -46,6 +58,55 @@ class Orb:
                 self.hp_animation_timer = 0
                 # Animation finished, ensure current hp is the target (should already be)
                 # self.hp = self.hp_target_for_animation # This should be done by take_hit/heal
+        
+        # Update size animation
+        if self.size_animation_timer > 0:
+            self.size_animation_timer -= dt
+            if self.size_animation_timer < 0:
+                self.size_animation_timer = 0
+            
+            # Interpolate radius based on animation progress
+            progress = 1.0 - (self.size_animation_timer / self.size_animation_duration)
+            # Smooth easing function
+            progress = progress * progress * (3.0 - 2.0 * progress)  # Smoothstep
+            
+            start_radius = self.current_radius if hasattr(self, 'current_radius') else self.base_radius
+            new_radius = start_radius + (self.target_radius - start_radius) * progress
+            
+            # Only update if radius changed significantly (avoid constant recreation)
+            current_r = getattr(self, 'current_radius', self.base_radius)
+            if abs(new_radius - current_r) > 0.5:
+                self.current_radius = new_radius
+                
+                # Recreate physics shape with new radius (pymunk circles are immutable)
+                if self.shape and self.body and hasattr(self, '_space') and self._space:
+                    try:
+                        # Remove old shape
+                        self._space.remove(self.shape)
+                        
+                        # Create new shape with updated radius
+                        new_shape = pymunk.Circle(self.body, self.current_radius)
+                        new_shape.elasticity = self.shape.elasticity
+                        new_shape.friction = self.shape.friction
+                        new_shape.collision_type = self.shape.collision_type
+                        new_shape.orb_ref = self
+                        
+                        # Add new shape to space
+                        self._space.add(new_shape)
+                        
+                        # Update reference
+                        self.shape = new_shape
+                        
+                        # Update scaled logo surface
+                        self._update_scaled_logo()
+                    except Exception as e:
+                        print(f"Warning: Failed to update orb {self.name} radius: {e}")
+                        # Fallback: just update the visual radius
+                        self.current_radius = new_radius
+                        self._update_scaled_logo()
+            else:
+                self.current_radius = new_radius
+                self._update_scaled_logo()
 
         # Velocity capping with blade speed reduction
         if self.body: 
@@ -69,7 +130,8 @@ class Orb:
         y = self.body.position.y + offset[1]
 
         # Create neon glow effect with multiple layers
-        base_radius = int(self.shape.radius)
+        # Use current_radius for visual effects to match physics
+        base_radius = int(self.current_radius if hasattr(self, 'current_radius') else self.shape.radius)
         
         # Outer glow layers (largest to smallest)
         glow_layers = [
@@ -131,9 +193,10 @@ class Orb:
         pygame.draw.circle(logo_glow_surface, (255, 255, 255, 40), (base_radius, base_radius), base_radius - 10)
         screen.blit(logo_glow_surface, (int(x - base_radius), int(y - base_radius)))
         
-        # Draw logo on top of everything
-        rect = self.logo_surface.get_rect(center=(x, y))
-        screen.blit(self.logo_surface, rect)
+        # Draw scaled logo on top of everything
+        logo_to_draw = self.scaled_logo_surface if hasattr(self, 'scaled_logo_surface') and self.scaled_logo_surface else self.logo_surface
+        rect = logo_to_draw.get_rect(center=(x, y))
+        screen.blit(logo_to_draw, rect)
 
         # Saw is drawn in the main loop if active, not here directly from orb
         # Bomb is instant, not drawn as equipped
@@ -167,6 +230,9 @@ class Orb:
             if self.health_change_callback:
                 import time
                 self.health_change_callback(self.name, old_hp_for_animation, new_hp, time.time(), "damage")
+            
+            # Trigger size reduction animation (7% smaller per HP lost)
+            self._animate_size_for_hp_change()
 
     def heal(self, amount=1): # Default heal amount to 1 as per recent changes
         if self.hp >= self.max_hp: # Already full, no heal or animation
@@ -187,8 +253,39 @@ class Orb:
             if self.health_change_callback:
                 import time
                 self.health_change_callback(self.name, old_hp_for_animation, new_hp, time.time(), "heal")
+            
+            # Trigger size increase animation (7% larger per HP gained)
+            self._animate_size_for_hp_change()
         # The old heal_effect_active and heal_effect_timer are removed
         # The new HP bar animation will serve as the visual feedback.
+    
+    def _animate_size_for_hp_change(self):
+        """Animate orb size based on current HP (7% change per HP point)"""
+        if not hasattr(self, 'base_radius') or self.base_radius == 0:
+            return
+        
+        # Calculate target radius: 7% reduction per missing HP
+        hp_ratio = self.hp / self.max_hp
+        size_multiplier = 1.0 - (1.0 - hp_ratio) * 0.07 * self.max_hp  # 7% per HP point
+        self.target_radius = self.base_radius * size_multiplier
+        
+        # Start animation
+        self.size_animation_timer = self.size_animation_duration
+        print(f"DEBUG: {self.name} size animation: {self.current_radius:.1f} -> {self.target_radius:.1f} (HP: {self.hp}/{self.max_hp})")
+    
+    def _update_scaled_logo(self):
+        """Update the scaled logo surface based on current radius"""
+        if self.original_logo_surface and hasattr(self, 'base_radius') and self.base_radius > 0:
+            # Calculate scale factor based on radius change
+            scale_factor = self.current_radius / self.base_radius
+            new_size = int(self.base_radius * 2 * scale_factor)
+            
+            if new_size > 0:
+                self.scaled_logo_surface = pygame.transform.smoothscale(
+                    self.original_logo_surface, (new_size, new_size)
+                )
+            else:
+                self.scaled_logo_surface = self.original_logo_surface
 
     def attach_shape(self, space, radius):
         """Crée le body + shape et lie la shape à self (pour collisions)."""
@@ -203,6 +300,16 @@ class Orb:
 
         space.add(body, shape)
         self.body, self.shape = body, shape
+        self._space = space  # Store space reference for size updates
+        
+        # Initialize size animation values
+        self.base_radius = radius
+        self.current_radius = radius
+        self.target_radius = radius
+        
+        # Store original logo and create initial scaled version
+        self.original_logo_surface = self.logo_surface.copy()
+        self.scaled_logo_surface = self.logo_surface.copy()
 
     def destroy(self, space):
         self.alive = False
