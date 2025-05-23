@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 import random, pygame, pymunk, math, time
 
-MAX_ORB_VELOCITY = 1500 # pixels/second, massively increased for faster action (from 1500)
+MAX_ORB_VELOCITY = 500 # pixels/second, reduced for better control and slower gameplay
 HP_ANIMATION_DURATION = 0.3 # seconds for the HP change animation
 
 @dataclass
@@ -284,7 +284,7 @@ class Saw:
     Scie attachée (centrée) sur son owner. Rayon > orb → dépasse visuellement.
     """
     def __init__(self, img_surface, owner_orb, space,
-                 omega_deg=720):
+                 omega_deg=360):
         self.owner: Orb = owner_orb # Type hint for clarity
         self.angle = 0
         self.omega = omega_deg

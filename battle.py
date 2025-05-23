@@ -62,7 +62,7 @@ PICKUP_KINDS_WEIGHTS = {
 # Constants from engine.game_objects that might be needed for prediction
 # This isn't ideal, better to pass them or have them in a shared config.
 # For now, hardcoding a reference value if not easily available.
-PRED_MAX_ORB_VELOCITY = 1500 # Must match MAX_ORB_VELOCITY in engine.game_objects.py
+PRED_MAX_ORB_VELOCITY = 500 # Must match MAX_ORB_VELOCITY in engine.game_objects.py
 
 def load_cfg(path):
     yaml = YAML(typ="safe")
@@ -285,7 +285,7 @@ class PredictiveBattleDirector:
             "arena_height": battle_context.arena_height, 
             "border_thickness": battle_context.border_thickness_cfg,
             "space_damping": 0.99,
-            "max_velocity": 1500,
+            "max_velocity": 500,
             "physics_substeps": 3
         }
         
@@ -957,8 +957,8 @@ def main(headless=False, export_only=False):
     pygame.font.init()
     pygame.mixer.init() # Initialize the mixer
     
-    # Initialize audio recorder for export
-    audio_recorder = AudioRecorder() if export_only else None
+    # Initialize audio recorder for both export and watch modes to ensure consistency
+    audio_recorder = AudioRecorder()
     
     # Initialize the advanced AI battle director
     battle_director = PredictiveBattleDirector(target_duration_min=61, target_duration_max=70)
@@ -1029,8 +1029,7 @@ def main(headless=False, export_only=False):
     
     clock = pygame.time.Clock()
     
-    # Initialize video background
-    # video_bg = VideoBackground("assets/backgrounds/abstract_loop_fade_2.mp4", CANVAS_W, CANVAS_H)
+    # Video background removed - using custom gradient animation instead
     
     saw_token_img = pygame.image.load("assets/pickups/saw_token.png").convert_alpha()
     heart_token_img = pygame.image.load("assets/pickups/heart_token.png").convert_alpha()
@@ -1144,9 +1143,8 @@ def main(headless=False, export_only=False):
         # dt_logic = (1 / GAME_FPS) # Simplified dt_logic as game_speed_factor is gone
         # The physics step dt is calculated directly later, no need for dt_logic here if only for that.
         
-        # Update video background
+        # Custom background animation timing
         dt = 1.0 / GAME_FPS
-        # video_bg.update(dt)
 
         # --- Update physics and game objects ---
         # dt = 1.0 / GAME_FPS * game_state["game_speed_factor"] # Old dt with game_speed_factor
@@ -1428,8 +1426,7 @@ def main(headless=False, export_only=False):
             pygame.draw.line(background_surface, color, (0, y), (CANVAS_W, y))
         
         # Add subtle grid pattern for cyberpunk effect
-        import time
-        grid_alpha = int(20 + 10 * abs(math.sin(time.time() * 0.5)))  # Pulsing grid
+        grid_alpha = int(20 + 10 * abs(math.sin(current_game_time_sec * 0.5)))  # Pulsing grid
         grid_color = (0, 150, 200, grid_alpha)
         
         # Vertical grid lines
@@ -1543,7 +1540,7 @@ def main(headless=False, export_only=False):
     print(f"Creating video from {len(frames)} frames...")
     video_clip = ImageSequenceClip(frames, fps=GAME_FPS)
     
-    if export_only and audio_recorder and audio_recorder.audio_events:
+    if audio_recorder and audio_recorder.audio_events:
         # Export audio and combine with video
         print("Exporting audio...")
         audio_path = OUT / f"{cfg['title'].replace(' ','_')}_audio.wav"

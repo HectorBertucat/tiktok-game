@@ -26,8 +26,8 @@ orbs:
       - 270.0
       - 500.0
     initial_velocity:
-      - 533.05
-      - 138.06
+      - 200.0
+      - 50.0
   - name: Inter Milan
     logo: assets/logos/inter.svg.png
     max_hp: 6
@@ -39,5 +39,5 @@ orbs:
       - 810.0
       - 500.0
     initial_velocity:
-      - -459.43
-      - -11.08
+      - -200.0
+      - -25.0

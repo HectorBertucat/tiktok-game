@@ -124,7 +124,7 @@ class ParticleEmitter:
                 angle_offset = random.uniform(-math.pi * 0.4, math.pi * 0.4) 
                 angle_rad = normal_angle_rad + angle_offset
                 # Significantly increase speed based on impact_strength for a bigger splash
-                speed = random.uniform(base_velocity_scale * 0.8, base_velocity_scale * 1.5) * (1 + impact_strength / 1500.0) 
+                speed = random.uniform(base_velocity_scale * 0.8, base_velocity_scale * 1.5) * (1 + impact_strength / 1000.0) 
             else:
                 angle_rad = random.uniform(0, 2 * math.pi)
                 speed = random.uniform(base_velocity_scale * 0.7, base_velocity_scale * 1.3)
