@@ -36,29 +36,29 @@ SFX_BOUNCE_DIR = Path("assets/sfx/bounce") # Path to bounce SFX
 # Dynamic Spawning Constants
 SAFETY_PERIOD_SECONDS = 61
 LOW_HEALTH_THRESHOLD = 1 # HP value at or below which emergency heart may spawn
-EMERGENCY_HEART_COOLDOWN_SECONDS = 10 # Min time between emergency hearts for the same orb
-EMERGENCY_HEART_PREDICTION_TIME_SECONDS = 0.75 # Predict 0.75s ahead for heart spawn
-ASSISTANCE_ITEM_COOLDOWN_SECONDS = 10 # Min time between assistance (saw/shield) items for the same orb under low HP
+EMERGENCY_HEART_COOLDOWN_SECONDS = 5 # Min time between emergency hearts (reduced from 10)
+EMERGENCY_HEART_PREDICTION_TIME_SECONDS = 0.5 # Predict 0.5s ahead for faster orbs (from 0.75)
+ASSISTANCE_ITEM_COOLDOWN_SECONDS = 5 # Min time between assistance items (reduced from 10)
 
 # Unified Predictive Spawning Constants
-UNIFIED_SPAWN_INTERVAL_SECONDS = 3 # Try to spawn a pickup every X seconds
-UNIFIED_PREDICTION_TIME_MIN_SECONDS = 1.5
-UNIFIED_PREDICTION_TIME_MAX_SECONDS = 2.5
-MAX_PICKUPS_ON_SCREEN = 6 # Max total pickups of all kinds
+UNIFIED_SPAWN_INTERVAL_SECONDS = 1.5 # Try to spawn a pickup every X seconds (increased from 3 to 1.5)
+UNIFIED_PREDICTION_TIME_MIN_SECONDS = 1.0  # Reduced for faster orbs (from 1.5)
+UNIFIED_PREDICTION_TIME_MAX_SECONDS = 1.8  # Reduced for faster orbs (from 2.5)
+MAX_PICKUPS_ON_SCREEN = 12 # Max total pickups of all kinds (increased from 6 to 12)
 
 # Weights for choosing pickups. Heart gets higher priority if an orb is low HP during safety period.
 PICKUP_KINDS_WEIGHTS = {
-    "heart": 8,    # Increased for frequent health
-    "saw": 20,     # Increased for frequent saws/blades
-    "shield": 3,   # Less frequent than saw/heart
-    "bomb": 0.5    # Remains rare
+    "heart": 25,    # Massively increased for frequent health (from 8 to 25)
+    "saw": 60,      # Massively increased for constant action (from 20 to 60)
+    "shield": 15,   # Increased for more protection (from 3 to 15)
+    "bomb": 2       # Slightly increased but still controlled (from 0.5 to 2)
 }
 # No separate LOW_HEALTH_THRESHOLD for general spawning, but safety period gives hearts priority.
 
 # Constants from engine.game_objects that might be needed for prediction
 # This isn't ideal, better to pass them or have them in a shared config.
 # For now, hardcoding a reference value if not easily available.
-PRED_MAX_ORB_VELOCITY = 1500 # Must match MAX_ORB_VELOCITY in engine.game_objects.py
+PRED_MAX_ORB_VELOCITY = 2500 # Must match MAX_ORB_VELOCITY in engine.game_objects.py
 
 def load_cfg(path):
     yaml = YAML(typ="safe")
@@ -86,8 +86,8 @@ class PredictiveBattleDirector:
         self.last_snapshot_time = 0
         
         # Predictive parameters
-        self.prediction_horizon = 8.0   # Predict up to 8 seconds ahead
-        self.analysis_interval = 2.0    # Re-analyze every 2 seconds
+        self.prediction_horizon = 5.0   # Predict up to 5 seconds ahead (reduced for faster action)
+        self.analysis_interval = 1.0    # Re-analyze every 1 second (increased from 2.0)
         self.last_analysis_time = 0
         
         # Battle pacing configuration
@@ -96,11 +96,18 @@ class PredictiveBattleDirector:
         self.end_game_phase = 65        # 45-65s: Climax phase, decisive action
         
         # Strategic spawning weights based on game phase and situation
+        # MASSIVELY more aggressive with all items for constant action
         self.phase_weights = {
-            'early': {'heart': 12, 'saw': 15, 'shield': 8, 'bomb': 1},
-            'mid': {'heart': 8, 'saw': 25, 'shield': 4, 'bomb': 3},
-            'end': {'heart': 5, 'saw': 30, 'shield': 2, 'bomb': 8}
+            'early': {'heart': 20, 'saw': 100, 'shield': 30, 'bomb': 1},    # Heavy action from start
+            'mid': {'heart': 15, 'saw': 150, 'shield': 25, 'bomb': 2},      # Peak everything
+            'end': {'heart': 10, 'saw': 200, 'shield': 20, 'bomb': 3}       # Maximum everything
         }
+        
+        # New constraints for your requirements
+        self.bomb_count = 0
+        self.max_bombs_per_game = 2
+        self.min_game_duration = 61.0
+        self.max_game_duration = 70.0
     
     def analyze_battle_state(self, current_time, orbs, battle_context):
         """Analyze current battle state and predict optimal item placements"""
@@ -274,12 +281,12 @@ class PredictiveBattleDirector:
             "arena_height": battle_context.arena_height, 
             "border_thickness": battle_context.border_thickness_cfg,
             "space_damping": 0.99,
-            "max_velocity": 1500,
+            "max_velocity": 2500,
             "physics_substeps": 3
         }
         
-        # Sample multiple time points to predict interaction opportunities
-        time_samples = [1.0, 2.0, 3.5, 5.0]
+        # Sample multiple time points to predict interaction opportunities (faster sampling)
+        time_samples = [0.5, 1.0, 1.5, 2.5, 3.5]
         
         for t in time_samples:
             orb_positions = []
@@ -390,129 +397,212 @@ class PredictiveBattleDirector:
             # Fallback: estimate based on health and time pressure
             time_until_predicted_end = self.target_duration - current_time
         
-        # Game ending too early: prioritize hearts and shields to extend (NEGATIVE time pressure)
-        if time_pressure < -0.1:  # Negative time pressure means extend the game
-            weights['heart'] *= 4.0  # Heavily favor hearts
-            weights['shield'] *= 3.0  # Favor shields
-            weights['saw'] *= 0.2     # Reduce offensive items
-            weights['bomb'] *= 0.1    # Heavily reduce bombs
-            print(f"🎯 Game ending early (predicted: {time_until_predicted_end:.1f}s), EXTENDING with defensive items")
+        # ENFORCE BOMB LIMIT: Never exceed 2 bombs per game
+        if self.bomb_count >= self.max_bombs_per_game:
+            weights['bomb'] = 0  # Completely disable bombs
+            print(f"🚫 Bomb limit reached ({self.bomb_count}/{self.max_bombs_per_game})")
         
-        # High positive time pressure: favor bombs and saws to end the battle
-        elif time_pressure > 0.7:
-            weights['bomb'] *= 3
-            weights['saw'] *= 2
-            weights['heart'] *= 0.3
-            weights['shield'] *= 0.2
-            print(f"🎯 High time pressure, ACCELERATING game end")
+        # ENFORCE MINIMUM DURATION: Never end before 61 seconds
+        if current_time < self.min_game_duration:
+            # Before 61s, heavily favor extension
+            weights['heart'] *= 6.0    # Much more hearts to keep orbs alive
+            weights['shield'] *= 4.0   # More shields for protection
+            weights['saw'] *= 1.5      # Still allow saws but boost defensive items more
+            weights['bomb'] = 0        # No bombs before 61s
+            print(f"⏰ Before minimum duration ({current_time:.1f}s < 61s), favoring survival")
         
-        # Game going too long: increase offensive pressure
-        elif orbs and time_until_predicted_end > self.target_duration - current_time + 15:
-            weights['saw'] *= 2
-            weights['bomb'] *= 2.5
-            weights['heart'] *= 0.4
-            weights['shield'] *= 0.3
-            print(f"🎯 Game running long (predicted: {time_until_predicted_end:.1f}s), increasing offensive pressure")
+        # ENFORCE MAXIMUM DURATION: Force end before 70 seconds
+        elif current_time > self.max_game_duration - 10:  # Last 10 seconds
+            weights['saw'] *= 3.0      # Triple saw rate for fast endings
+            weights['heart'] *= 0.1    # Minimal hearts
+            weights['shield'] *= 0.1   # Minimal shields
+            if self.bomb_count < self.max_bombs_per_game:
+                weights['bomb'] *= 5   # Boost bombs if available
+            print(f"⚡ Approaching maximum duration ({current_time:.1f}s), forcing conclusion")
         
-        # Large health disparity: help the weaker orb or pressure the stronger one
-        elif orb_analysis['health_disparity'] >= 3:
-            if len(orb_analysis['low_health_orbs']) > 0:
-                # Give the weak orb a chance
-                weights['heart'] *= 2
-                weights['shield'] *= 2
-                weights['saw'] *= 0.7
+        # INTELLIGENT TIMING: Between 61-70 seconds
+        elif current_time >= self.min_game_duration:
+            
+            # Check for full-health orbs to avoid wasted hearts
+            full_health_orbs = [orb for orb in orbs if orb.hp >= orb.max_hp] if orbs else []
+            
+            # Game ending too early within valid window: prioritize strategic survival
+            if time_pressure < -0.1:
+                # Only give hearts to orbs that can benefit (not full health)
+                if len(full_health_orbs) < len(orbs):
+                    weights['heart'] *= 3.0  # Strategic hearts for non-full orbs
+                else:
+                    weights['heart'] *= 0.1  # Avoid hearts if all orbs are full
+                
+                weights['shield'] *= 2.5  # Shields for protection
+                weights['saw'] *= 0.8     # Slightly reduce saws but keep action
+                print(f"🛡️ Extending strategically (predicted: {time_until_predicted_end:.1f}s)")
+            
+            # Normal progression within valid window
             else:
-                # Pressure the dominant orb
-                weights['saw'] *= 1.5
-                weights['bomb'] *= 2
+                # Check if any orbs have full health to avoid wasteful hearts
+                if len(full_health_orbs) > 0:
+                    weights['heart'] *= 0.3  # Heavily reduce hearts for full-health orbs
+                    print(f"💔 Reducing hearts - {len(full_health_orbs)} orbs at full health")
+                
+                # Boost saws for constant action
+                weights['saw'] *= 2.0
+                
+                # Large health disparity: balance the fight
+                if orb_analysis['health_disparity'] >= 4:
+                    damaged_orbs = [orb for orb in orbs if orb.hp < orb.max_hp] if orbs else []
+                    if len(damaged_orbs) > 0:
+                        weights['heart'] *= 2.0  # Help damaged orbs
+                        weights['shield'] *= 1.5  # Give them protection
+                    
+                    weights['saw'] *= 1.2  # Keep pressure on stronger orb
+                    print(f"⚖️ Balancing fight - disparity: {orb_analysis['health_disparity']}")
         
-        # Very low total health: be more conservative unless time pressure is high
-        elif orb_analysis['total_health'] <= 4 and time_pressure < 0.7:
-            weights['heart'] *= 1.5
-            weights['bomb'] *= 0.5
-        
-        # High aggression phase: increase offensive items
-        max_aggression = max(orb_analysis['aggression_scores'].values()) if orb_analysis['aggression_scores'] else 0
-        if max_aggression > 2.0:
-            weights['saw'] *= 1.3
-            weights['shield'] *= 1.2
+        # Always prioritize saws for maximum action
+        weights['saw'] *= 1.5  # Base saw boost for exciting gameplay
         
         return weights
     
     def generate_immediate_spawns(self, orb_analysis, interactions, time_pressure):
         """Generate items that should be spawned immediately"""
         immediate = []
+        current_time = self.last_analysis_time
         
-        # If time pressure is negative, we need to extend the game - prioritize hearts
-        if time_pressure < -0.1:
-            # Emergency hearts for any low HP orbs to extend the game
-            for orb in orb_analysis['low_health_orbs']:
-                if not self.should_avoid_repetitive_pattern(orb.name, +1, self.last_analysis_time):
-                    immediate.append({
-                        'type': 'heart',
-                        'target_orb': orb.name,
-                        'urgency': 'extend_game',
-                        'reason': 'extend_game_healing'
-                    })
-                    break  # Only spawn one heart at a time
-            
-            # If no low HP orbs, spawn heart for weakest orb anyway
-            if not immediate and orb_analysis['weakest_orb']:
-                immediate.append({
-                    'type': 'heart',
-                    'target_orb': orb_analysis['weakest_orb'].name,
-                    'urgency': 'extend_game',
-                    'reason': 'extend_game_healing'
-                })
+        # RULE: Never allow bombs to end the game (only saws should deliver final blow)
+        # RULE: Never give hearts to full-health orbs
+        # RULE: Prioritize saws for constant aggressive action
         
-        # Emergency heart for critically low orb (but not if we need to end soon)
-        elif time_pressure < 0.8:  # Normal emergency healing when not forcing conclusion
-            critical_orbs = [orb for orb in orb_analysis['low_health_orbs'] if orb.hp == 1]
+        # Check for orbs that can actually benefit from hearts (not at full health)
+        orbs = orb_analysis.get('orbs', [])
+        damaged_orbs = [orb for orb in orbs if orb.hp < orb.max_hp]
+        critical_orbs = [orb for orb in damaged_orbs if orb.hp <= 1]
+        
+        # Before 61 seconds: Keep everyone alive with strategic healing
+        if current_time < self.min_game_duration:
             if critical_orbs:
                 orb = critical_orbs[0]
-                # Check if this would create a repetitive pattern
-                if not self.should_avoid_repetitive_pattern(orb.name, +1, self.last_analysis_time):
+                if not self.should_avoid_repetitive_pattern(orb.name, +1, current_time):
                     immediate.append({
                         'type': 'heart',
                         'target_orb': orb.name,
-                        'urgency': 'critical',
-                        'reason': 'emergency_healing'
+                        'urgency': 'survive_to_61s',
+                        'reason': 'maintain_minimum_duration'
                     })
+                    print(f"💊 Emergency heart for {orb.name} to reach 61s")
         
-        # Decisive bomb only if we need to end the battle (high positive time pressure)
-        elif time_pressure > 0.9 and orb_analysis['health_disparity'] <= 1:
-            # Battle is too close and needs to end, force a decision
+        # After 61 seconds: Allow natural progression but prevent bomb endings
+        elif current_time >= self.min_game_duration:
+            
+            # If game is close to ending from damage, only allow saw victories
+            living_orbs = [orb for orb in orbs if orb.hp > 0]
+            if len(living_orbs) == 2:
+                very_low_orbs = [orb for orb in living_orbs if orb.hp <= 1]
+                if very_low_orbs and time_pressure > 0.5:
+                    # Game is close to ending - prioritize saws for dramatic finishes
+                    immediate.append({
+                        'type': 'saw',
+                        'target_orb': orb_analysis['dominant_orb'].name if orb_analysis['dominant_orb'] else None,
+                        'urgency': 'dramatic_finish',
+                        'reason': 'saw_victory_only'
+                    })
+                    print(f"⚔️ Spawning saw for dramatic finish - no bomb endings allowed")
+            
+            # Strategic healing for damaged orbs (but never for full-health orbs)
+            if critical_orbs and time_pressure < 0.7:  # Not in endgame rush
+                orb = critical_orbs[0]
+                if not self.should_avoid_repetitive_pattern(orb.name, +1, current_time):
+                    immediate.append({
+                        'type': 'heart',
+                        'target_orb': orb.name,
+                        'urgency': 'strategic_healing',
+                        'reason': 'extend_battle_drama'
+                    })
+                    print(f"💝 Strategic heart for {orb.name} for continued action")
+        
+        # Approaching 70 seconds: Force saw-based conclusion
+        if current_time > self.max_game_duration - 8:  # Last 8 seconds
+            # Spawn multiple saws to guarantee a finish
             immediate.append({
-                'type': 'bomb',
+                'type': 'saw',
                 'target_orb': orb_analysis['dominant_orb'].name if orb_analysis['dominant_orb'] else None,
-                'urgency': 'decisive',
-                'reason': 'force_conclusion'
+                'urgency': 'force_saw_ending',
+                'reason': 'guarantee_70s_limit'
             })
+            immediate.append({
+                'type': 'saw',
+                'target_orb': orb_analysis['weakest_orb'].name if orb_analysis['weakest_orb'] else None,
+                'urgency': 'force_saw_ending',
+                'reason': 'guarantee_70s_limit'
+            })
+            print(f"⚡ FORCE ENDING: Multiple saws to finish by 70s")
         
         return immediate
     
     def generate_scheduled_spawns(self, interactions, orb_analysis, current_time):
-        """Generate items scheduled for future interactions"""
+        """Generate items scheduled for future interactions - HEAVILY favor saws"""
         scheduled = []
         
-        # Schedule items at predicted interaction points
+        # Get orbs for strategic decisions
+        orbs = orb_analysis.get('orbs', [])
+        damaged_orbs = [orb for orb in orbs if orb.hp < orb.max_hp]
+        
+        # Schedule items at predicted interaction points with saw priority
         for interaction in interactions:
-            if interaction['interaction_strength'] > 0.6:  # High-likelihood interaction
-                spawn_time = current_time + interaction['time'] - 0.5  # Spawn 0.5s before interaction
+            if interaction['interaction_strength'] > 0.4:  # Lower threshold for more frequent spawning
+                spawn_time = current_time + interaction['time'] - 0.3  # Spawn closer to interaction for precision
                 
-                # Choose item type based on interaction context
-                if interaction['time'] < 3.0:  # Near-term interaction
-                    item_type = 'saw'  # Offensive for immediate impact
-                else:  # Longer-term interaction
-                    item_type = random.choice(['saw', 'shield'])  # Mix offensive and defensive
+                # HEAVILY prioritize saws for maximum action
+                if interaction['time'] < 2.0:  # Immediate interactions
+                    item_type = 'saw'  # Always saws for quick action
+                    
+                elif interaction['time'] < 4.0:  # Medium-term interactions
+                    # 80% saws, 20% shields/hearts
+                    saw_probability = 0.8
+                    
+                    # If we have damaged orbs and they're in the interaction, consider hearts
+                    interaction_orb_names = interaction.get('orbs', [])
+                    damaged_in_interaction = any(orb.name in interaction_orb_names for orb in damaged_orbs)
+                    
+                    if random.random() < saw_probability:
+                        item_type = 'saw'
+                    elif damaged_in_interaction and len(damaged_orbs) > 0:
+                        # Strategic heart for damaged orb in interaction
+                        item_type = 'heart'
+                    else:
+                        item_type = 'shield'  # Protection for incoming encounter
+                        
+                else:  # Long-term interactions (4+ seconds ahead)
+                    # 70% saws, 20% shields, 10% hearts
+                    rand = random.random()
+                    if rand < 0.7:
+                        item_type = 'saw'
+                    elif rand < 0.9:
+                        item_type = 'shield'
+                    else:
+                        # Only hearts for damaged orbs, never for full-health
+                        if damaged_orbs:
+                            item_type = 'heart'
+                        else:
+                            item_type = 'saw'  # Default back to saw if no damaged orbs
                 
                 scheduled.append({
                     'spawn_time': spawn_time,
                     'type': item_type,
                     'position': interaction['position'],
                     'target_interaction': interaction,
-                    'reason': 'predicted_encounter'
+                    'reason': f'predicted_{item_type}_encounter'
                 })
+                
+                # For high-intensity interactions, schedule multiple items
+                if interaction['interaction_strength'] > 0.8 and interaction['time'] > 1.0:
+                    # Schedule a second item slightly later for extended engagement
+                    scheduled.append({
+                        'spawn_time': spawn_time + 0.8,
+                        'type': 'saw',  # Always a saw for extended action
+                        'position': interaction['position'], 
+                        'target_interaction': interaction,
+                        'reason': 'extended_engagement_saw'
+                    })
         
         return scheduled
     
@@ -571,6 +661,15 @@ class PredictiveBattleDirector:
                     return True
         
         return False
+    
+    def track_bomb_spawn(self):
+        """Track when a bomb is spawned to enforce the 2-bomb limit"""
+        self.bomb_count += 1
+        print(f"💣 Bomb spawned - count: {self.bomb_count}/{self.max_bombs_per_game}")
+        
+        # If this is the second bomb, ensure no more bombs can spawn
+        if self.bomb_count >= self.max_bombs_per_game:
+            print(f"🚫 Bomb limit reached - no more bombs allowed this game")
 
 class VideoBackground:
     def __init__(self, video_path, canvas_width, canvas_height):
@@ -918,6 +1017,11 @@ def main():
             # Process immediate spawns from AI director
             for spawn_plan in ai_strategy['immediate_spawns']:
                 if len(pickups) < MAX_PICKUPS_ON_SCREEN:
+                    # Check bomb limit before spawning
+                    if spawn_plan['type'] == 'bomb' and battle_director.bomb_count >= battle_director.max_bombs_per_game:
+                        print(f"🚫 AI wanted to spawn bomb but limit reached - spawning saw instead")
+                        spawn_plan['type'] = 'saw'  # Convert bomb to saw
+                    
                     # Find the target orb
                     target_orb = None
                     if spawn_plan.get('target_orb'):
@@ -925,6 +1029,10 @@ def main():
                     
                     if not target_orb:
                         target_orb = random.choice([o for o in orbs if o.hp > 0] or orbs)
+                    
+                    # Track bomb spawns
+                    if spawn_plan['type'] == 'bomb':
+                        battle_director.track_bomb_spawn()
                     
                     # Use existing spawning logic but override the item type
                     battle_context.handle_spawn_pickup_event({
@@ -1001,10 +1109,21 @@ def main():
                     target_orb_for_spawn = default_target_orb # Ensure we use the initially chosen random orb
                     
                     # Use AI strategy weights if available, otherwise use default weights
-                    weights_to_use = PICKUP_KINDS_WEIGHTS
+                    weights_to_use = PICKUP_KINDS_WEIGHTS.copy()
                     if ai_strategy and ai_strategy.get('weights_override'):
                         weights_to_use = ai_strategy['weights_override']
                         print(f"🤖 AI using strategic weights: {weights_to_use}")
+                    
+                    # RULE: Never give hearts to full-health orbs
+                    if target_orb_for_spawn.hp >= target_orb_for_spawn.max_hp:
+                        weights_to_use['heart'] = 0  # Disable hearts for full-health orbs
+                        weights_to_use['saw'] *= 2   # Boost saws instead
+                        print(f"💔 {target_orb_for_spawn.name} at full health - disabling hearts, boosting saws")
+                    
+                    # RULE: Enforce bomb limit
+                    if battle_director.bomb_count >= battle_director.max_bombs_per_game:
+                        weights_to_use['bomb'] = 0
+                        weights_to_use['saw'] *= 1.5  # Boost saws when bombs are disabled
                     
                     available_kinds = list(weights_to_use.keys())
                     kind_weights = [weights_to_use[k] for k in available_kinds]
@@ -1069,6 +1188,15 @@ def main():
                     elif chosen_kind_for_spawn == "bomb": img_surface = bomb_token_img
 
                     if img_surface:
+                        # Check bomb limit and enforce rules
+                        if chosen_kind_for_spawn == "bomb":
+                            if battle_director.bomb_count >= battle_director.max_bombs_per_game:
+                                print(f"🚫 Regular spawn wanted bomb but limit reached - spawning saw instead")
+                                chosen_kind_for_spawn = "saw"
+                                img_surface = saw_token_img
+                            else:
+                                battle_director.track_bomb_spawn()
+                        
                         new_pickup = Pickup(
                             kind=chosen_kind_for_spawn,
                             img_surface=img_surface,

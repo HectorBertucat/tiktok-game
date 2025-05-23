@@ -10,7 +10,7 @@ active_saws = []
 # DEFAULT_BOMB_COUNTDOWN = 3.0 # Unused
 DEFAULT_BOMB_RADIUS = 150
 DEFAULT_BOMB_DAMAGE = 3
-DEFAULT_BOMB_IMPULSE = 7500
+DEFAULT_BOMB_IMPULSE = 15000  # Doubled for more explosive force (from 7500)
 # FREEZE_DURATION = 2.0 # Freeze is now until next hit
 
 WALL_COLLISION_TYPE = 4 # Define wall collision type
@@ -60,7 +60,7 @@ def make_space(arena_size=(800, 800), border_thickness=6):
     ]
 
     for s in static_segments:
-        s.elasticity = 1.0 # Perfect bounce
+        s.elasticity = 1.3 # Super bouncy walls for faster action (increased from 1.0)
         s.friction = 0.5 # Some friction
         s.collision_type = WALL_COLLISION_TYPE # Assign specific type to walls
         space.add(s)

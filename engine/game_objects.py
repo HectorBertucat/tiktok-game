@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 import random, pygame, pymunk, math
 
-MAX_ORB_VELOCITY = 1500 # pixels/second, adjust as needed
+MAX_ORB_VELOCITY = 2500 # pixels/second, massively increased for faster action (from 1500)
 HP_ANIMATION_DURATION = 0.3 # seconds for the HP change animation
 
 @dataclass
