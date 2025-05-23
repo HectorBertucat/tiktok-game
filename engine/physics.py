@@ -166,6 +166,10 @@ def register_saw_hits(space, battle_context, dmg=1):
         saw = saw_shape.saw_ref
         orb_hit_by_saw = orb_shape.orb_ref
 
+        # Safety check for None references
+        if not saw or not saw.owner or not orb_hit_by_saw:
+            return True  # Continue collision but skip damage logic
+        
         print(f"DEBUG: Saw collision detected between {saw.owner.name}'s saw and {orb_hit_by_saw.name}")
 
         if orb_hit_by_saw == saw.owner or not saw.alive:

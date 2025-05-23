@@ -1131,6 +1131,45 @@ def main(headless=False, export_only=False):
                 space.add(s)
             
             print(f"Arena updated: {new_width:.0f}x{new_height:.0f} ({size_ratio*100:.1f}% of original)")
+            
+            # Clean up pickups that are now outside the valid arena area
+            _cleanup_invalid_pickups()
+
+    def _cleanup_invalid_pickups():
+        """Remove pickups that are outside the current arena bounds or too close to borders"""
+        if not pickups:
+            return
+            
+        current_arena_w = game_state["arena_current_width"]
+        current_arena_h = game_state["arena_current_height"]
+        arena_offset_x = game_state["arena_offset_x"]
+        arena_offset_y = game_state["arena_offset_y"]
+        
+        # Define valid area with safety margin
+        safety_margin = 30  # Pixels from border
+        min_x = arena_offset_x + safety_margin
+        max_x = arena_offset_x + current_arena_w - safety_margin
+        min_y = arena_offset_y + safety_margin
+        max_y = arena_offset_y + current_arena_h - safety_margin
+        
+        pickups_to_remove = []
+        for pickup in pickups[:]:  # Copy list to avoid modification during iteration
+            if not pickup.alive:
+                continue
+                
+            pos_x, pos_y = pickup.body.position
+            
+            # Check if pickup is outside valid area or too close to borders
+            if (pos_x < min_x or pos_x > max_x or 
+                pos_y < min_y or pos_y > max_y):
+                print(f"Removing pickup {pickup.kind} at ({pos_x:.1f}, {pos_y:.1f}) - outside arena bounds")
+                pickup.destroy(space)
+                pickups_to_remove.append(pickup)
+        
+        # Remove from pickups list
+        for pickup in pickups_to_remove:
+            if pickup in pickups:
+                pickups.remove(pickup)
 
     orbs = []
     pickups = [] # Initialize pickups list here
@@ -1661,6 +1700,7 @@ def main(headless=False, export_only=False):
             elif audio_clip.duration < video_clip.duration:
                 # Pad with silence if needed
                 from moviepy.audio.AudioClip import AudioArrayClip
+                import numpy as np  # Import numpy here when needed
                 silence_duration = video_clip.duration - audio_clip.duration
                 silence = AudioArrayClip(np.zeros((int(silence_duration * audio_clip.fps), 2)), fps=audio_clip.fps)
                 audio_clip = CompositeAudioClip([audio_clip, silence.with_start(audio_clip.duration)])
@@ -1788,9 +1828,10 @@ class MainBattleContext:
 
             pos_x = x * current_arena_w if 0 <= x <= 1 else x
             pos_y = y * current_arena_h if 0 <= y <= 1 else y
-            # Add offset and clamp to be within arena, away from edges for pickup radius
-            pos_x = arena_offset_x + max(self.pickup_radius, min(pos_x, current_arena_w - self.pickup_radius))
-            pos_y = arena_offset_y + max(self.pickup_radius, min(pos_y, current_arena_h - self.pickup_radius))
+            # Add offset and clamp to be within arena, with extra safety margin from borders
+            safety_margin = max(self.pickup_radius, 30)  # At least 30px from border
+            pos_x = arena_offset_x + max(safety_margin, min(pos_x, current_arena_w - safety_margin))
+            pos_y = arena_offset_y + max(safety_margin, min(pos_y, current_arena_h - safety_margin))
             pickup_pos = (pos_x, pos_y)
         else: # Random position if x or y is missing
             # Use current arena dimensions and offset from game state
@@ -1799,8 +1840,10 @@ class MainBattleContext:
             arena_offset_x = self.game_state.get("arena_offset_x", 0.0)
             arena_offset_y = self.game_state.get("arena_offset_y", 0.0)
             
-            rand_x = random.uniform(self.pickup_radius, current_arena_w - self.pickup_radius)
-            rand_y = random.uniform(self.pickup_radius, current_arena_h - self.pickup_radius)
+            # Use safety margin for random spawning too
+            safety_margin = max(self.pickup_radius, 30)  # At least 30px from border
+            rand_x = random.uniform(safety_margin, current_arena_w - safety_margin)
+            rand_y = random.uniform(safety_margin, current_arena_h - safety_margin)
             pickup_pos = (arena_offset_x + rand_x, arena_offset_y + rand_y)
 
         img_surface = None
@@ -1812,18 +1855,34 @@ class MainBattleContext:
         else: print(f"Warning: Unknown pickup kind '{kind}' in event, no image.")
 
         if img_surface:
-            # The Pickup class itself needs to be aware of its radius for its shape
-            # Assuming Pickup class in engine.game_objects.py is modified to accept radius
-            # or that its default radius matches self.pickup_radius
-            new_pickup = Pickup(kind, img_surface, pickup_pos, self.space, radius=self.pickup_radius) # REMOVED current_game_time_sec
-            self.pickups.append(new_pickup)
-            if kind == "bomb": # If a bomb pickup is spawned (this is for the pickup itself, not explosion)
-                # You might not flash for bomb *spawn*, but for its *explosion*.
-                # For demonstration, let's say picking up a bomb item also causes a small flash.
-                # This is an example of how to call the flash logic.
-                # self.game_state["border_current_color"] = self.game_state["border_flash_color_config"]
-                # self.game_state["border_flash_until_time"] = self.current_game_time_sec + 0.5 # Short flash for pickup
-                pass
+            # Validate final position is within safe bounds
+            final_x, final_y = pickup_pos
+            current_arena_w = self.game_state.get("arena_current_width", self.arena_width)
+            current_arena_h = self.game_state.get("arena_current_height", self.arena_height)
+            arena_offset_x = self.game_state.get("arena_offset_x", 0.0)
+            arena_offset_y = self.game_state.get("arena_offset_y", 0.0)
+            
+            safety_margin = max(self.pickup_radius, 30)
+            min_x = arena_offset_x + safety_margin
+            max_x = arena_offset_x + current_arena_w - safety_margin
+            min_y = arena_offset_y + safety_margin
+            max_y = arena_offset_y + current_arena_h - safety_margin
+            
+            # Only create pickup if position is valid
+            if min_x <= final_x <= max_x and min_y <= final_y <= max_y:
+                new_pickup = Pickup(kind, img_surface, pickup_pos, self.space, radius=self.pickup_radius)
+                self.pickups.append(new_pickup)
+                print(f"Spawned {kind} pickup at ({final_x:.1f}, {final_y:.1f}) within arena bounds")
+                
+                if kind == "bomb": # If a bomb pickup is spawned (this is for the pickup itself, not explosion)
+                    # You might not flash for bomb *spawn*, but for its *explosion*.
+                    # For demonstration, let's say picking up a bomb item also causes a small flash.
+                    # This is an example of how to call the flash logic.
+                    # self.game_state["border_current_color"] = self.game_state["border_flash_color_config"]
+                    # self.game_state["border_flash_until_time"] = self.current_game_time_sec + 0.5 # Short flash for pickup
+                    pass
+            else:
+                print(f"Rejected {kind} pickup spawn at ({final_x:.1f}, {final_y:.1f}) - outside safe arena bounds")
         else:
             print(f"Could not spawn pickup of kind '{kind}' due to missing image.")
 
